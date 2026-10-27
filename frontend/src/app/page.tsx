@@ -1691,6 +1691,7 @@ export default function KaraokePage() {
             </div>
           </div>
         ) : videoId ? (
+          <div className="h-full w-full flex items-center justify-center bg-black">
             <div className="text-center space-y-3 max-w-md px-6">
               {nowThumb ? (
                 // eslint-disable-next-line @next/next/no-img-element
