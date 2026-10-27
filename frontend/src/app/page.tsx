@@ -246,65 +246,34 @@ export default function KaraokePage() {
   const [lyricsPasteText, setLyricsPasteText] = useState("");
   const [lyricsEditText, setLyricsEditText] = useState("");
   const [lyricsShow, setLyricsShow] = useState(true);          // 오버레이 on/off
-
-  // ---- Lyrics 위치 (드래그로 이동, localStorage 저장) ----
-  const LYRICS_POS_DEFAULT = { x: 50, y: 85 }; // % of video box
-  const videoBoxRef = useRef<HTMLDivElement | null>(null);
-  const [lyricsPos, setLyricsPos] = useState<{ x: number; y: number }>(LYRICS_POS_DEFAULT);
-  const [lyricsDragging, setLyricsDragging] = useState(false);
-  const lyricsDragRef = useRef<{ grabX: number; grabY: number } | null>(null);
+  // ---- Lyrics 표시 영역: 영상 하단 고정 레터박스 밴드 (드래그 없음) ----
+  const [lyricsBandPct, setLyricsBandPct] = useState(26); // 밴드 높이 (% of video box)
 
   useEffect(() => {
     try {
       const raw = window.localStorage.getItem("karaoke_ui_settings_v1");
       const s = raw ? JSON.parse(raw) : {};
-      setLyricsPos({
-        x: typeof s.lyricsX === "number" ? s.lyricsX : LYRICS_POS_DEFAULT.x,
-        y: typeof s.lyricsY === "number" ? s.lyricsY : LYRICS_POS_DEFAULT.y,
-      });
+      if (typeof s.lyricsBandPct === "number" && s.lyricsBandPct >= 10 && s.lyricsBandPct <= 60)
+        setLyricsBandPct(s.lyricsBandPct);
     } catch {}
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  const persistLyricsPos = (pos: { x: number; y: number }) => {
+  const persistLyricsBand = (pct: number) => {
     try {
       const raw = window.localStorage.getItem("karaoke_ui_settings_v1");
       const s = raw ? JSON.parse(raw) : {};
-      window.localStorage.setItem("karaoke_ui_settings_v1", JSON.stringify({ ...s, lyricsX: pos.x, lyricsY: pos.y }));
+      s.lyricsBandPct = pct;
+      window.localStorage.setItem("karaoke_ui_settings_v1", JSON.stringify(s));
     } catch {}
   };
 
-  const onLyricsPointerDown = (e: React.PointerEvent<HTMLDivElement>) => {
-    const box = videoBoxRef.current;
-    if (!box) return;
-    const rect = box.getBoundingClientRect();
-    lyricsDragRef.current = {
-      grabX: ((e.clientX - rect.left) / rect.width) * 100 - lyricsPos.x,
-      grabY: ((e.clientY - rect.top) / rect.height) * 100 - lyricsPos.y,
-    };
-    e.currentTarget.setPointerCapture(e.pointerId);
-    setLyricsDragging(true);
+  const setLyricsBand = (pct: number) => {
+    const v = Math.min(60, Math.max(12, Math.round(pct)));
+    setLyricsBandPct(v);
+    persistLyricsBand(v);
   };
 
-  const onLyricsPointerMove = (e: React.PointerEvent<HTMLDivElement>) => {
-    const d = lyricsDragRef.current;
-    const box = videoBoxRef.current;
-    if (!d || !box) return;
-    const rect = box.getBoundingClientRect();
-    setLyricsPos({
-      x: Math.min(97, Math.max(3, ((e.clientX - rect.left) / rect.width) * 100 - d.grabX)),
-      y: Math.min(96, Math.max(5, ((e.clientY - rect.top) / rect.height) * 100 - d.grabY)),
-    });
-  };
 
-  const onLyricsPointerUp = () => {
-    if (!lyricsDragRef.current) return;
-    lyricsDragRef.current = null;
-    setLyricsDragging(false);
-    persistLyricsPos(lyricsPos);
-  };
-
-  // ---- Video 영역 높이 (위/아래 핸들 드래그로 조절, localStorage 저장) ----
   const videoAreaRef = useRef<HTMLDivElement | null>(null);
   const [videoH, setVideoH] = useState<number | null>(null);
   const [videoResizing, setVideoResizing] = useState(false);
@@ -1715,26 +1684,18 @@ export default function KaraokePage() {
         style={videoH != null ? { height: videoH, flex: "0 0 auto" } : undefined}
       >
         {videoUrl ? (
-          <div ref={videoBoxRef} className="absolute inset-0 bg-black">
+          <div className="absolute inset-0 bg-black">
             <video ref={videoRef} src={videoUrl} className="absolute inset-0 w-full h-full object-contain bg-black" playsInline muted />
             <div className="absolute top-3 left-3 max-w-[75%] rounded-xl border border-zinc-800 bg-black/60 backdrop-blur px-3 py-2 text-white text-sm sm:text-base font-semibold shadow">
               {nowTitle || videoId}
             </div>
-            {/* Lyrics overlay (드래그로 위치 이동, 더블클릭 = 기본 위치로 복귀) */}
+            {/* Lyrics band — 영상 하단 고정 레터박스 밴드 (영상 위에 반투명 검정, 가사 전용 영역) */}
             {lyrics && lyricsShow && lyricActiveIdx >= 0 ? (
               <div
-                className={`absolute flex flex-col items-center touch-none select-none rounded-lg ring-1 ring-white/0 transition-colors ${lyricsDragging ? "ring-white/40 bg-black/20 cursor-grabbing" : "cursor-grab hover:ring-white/20"}`}
-                style={{ left: `${lyricsPos.x}%`, top: `${lyricsPos.y}%`, transform: "translate(-50%, -50%)" }}
-                onPointerDown={onLyricsPointerDown}
-                onPointerMove={onLyricsPointerMove}
-                onPointerUp={onLyricsPointerUp}
-                onPointerCancel={onLyricsPointerUp}
-                onDoubleClick={() => {
-                  setLyricsPos(LYRICS_POS_DEFAULT);
-                  persistLyricsPos(LYRICS_POS_DEFAULT);
-                }}
+                className="absolute inset-x-0 bottom-0 z-20 flex flex-col items-center justify-center px-6 pointer-events-none bg-gradient-to-t from-black/85 via-black/55 to-transparent"
+                style={{ height: `${lyricsBandPct}%` }}
               >
-                <div className="max-w-[70vw] space-y-1 text-center px-4 py-1">
+                <div className="max-w-[80%] space-y-1 text-center">
                   {lyricActiveIdx > 0 ? (
                     <div className="text-sm sm:text-base text-zinc-400/80 truncate">{lyricLines[lyricActiveIdx - 1].text}</div>
                   ) : null}
