@@ -511,9 +511,9 @@ async def cancel_job(task_id: str):
     return {"ok": True, "removed_from_queue": removed}
 
 
-@app.get("/library")
+@app.get("/tracks")
 async def library(limit: int = 50):
-    """List cached tracks (for UI)."""
+    """List cached tracks (for UI). /library는 SPA 라이브러리 페이지에 양보."""
     items = list_tracks(DATA_DIR, limit=limit)
     # keep response small
     out = []
