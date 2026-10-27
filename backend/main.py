@@ -1520,6 +1520,12 @@ FRONTEND_DIST = os.environ.get(
     os.path.join(os.path.dirname(__file__), "..", "frontend", "out"),
 )
 
+
+def _no_cache() -> dict:
+    """HTML 응답 캐시 방지 — 배포 후 옛 JS 청크 참조로 hydration 실패하는 문제 예방."""
+    return {"Cache-Control": "no-cache, no-store, must-revalidate", "Pragma": "no-cache"}
+
+
 if os.path.isdir(FRONTEND_DIST):
     assets_dir = os.path.join(FRONTEND_DIST, "_next")
     if os.path.isdir(assets_dir):
@@ -1537,13 +1543,13 @@ if os.path.isdir(FRONTEND_DIST):
         candidate = os.path.normpath(os.path.join(FRONTEND_DIST, full_path))
         if full_path and candidate.startswith(os.path.abspath(FRONTEND_DIST)):
             if os.path.isfile(candidate):
-                return FileResponse(candidate)
+                return FileResponse(candidate, headers=_no_cache())
             idx = os.path.join(candidate, "index.html")
             if os.path.isfile(idx):
-                return FileResponse(idx)
+                return FileResponse(idx, headers=_no_cache())
         fallback = os.path.join(FRONTEND_DIST, "index.html")
         if os.path.isfile(fallback):
-            return FileResponse(fallback)
+            return FileResponse(fallback, headers=_no_cache())
         raise HTTPException(status_code=404, detail="frontend not built — run install.sh")
 
 
