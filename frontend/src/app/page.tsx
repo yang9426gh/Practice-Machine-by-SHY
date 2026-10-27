@@ -459,6 +459,10 @@ export default function KaraokePage() {
       setLyricsEditText((prev) => (prev ? `${prev.replace(/\s*$/, "")}\n${stamp} ` : `${stamp} `));
       return;
     }
+    // 삽입 전 스크롤 위치 저장 (focus/커서 이동이 스크롤을 강제 이동시키는 것 방지)
+    const prevScrollTop = el.scrollTop;
+    const scroller = el.closest("[data-lyrics-scroll]") as HTMLElement | null;
+    const prevScrollerTop = scroller ? scroller.scrollTop : null;
     const start = el.selectionStart ?? lyricsEditText.length;
     const end = el.selectionEnd ?? start;
     const before = lyricsEditText.slice(0, start);
@@ -480,10 +484,12 @@ export default function KaraokePage() {
       caret = start + insert.length;
     }
     setLyricsEditText(newText);
-    // 삽입 후 커서를 스탬프 뒤로 이동
+    // 삽입 후 커서를 스탬프 뒤로 이동 + 원래 스크롤 위치 복원 (커서는 같은 줄에 있으니 화면 고정)
     requestAnimationFrame(() => {
       el.focus();
       el.setSelectionRange(caret, caret);
+      el.scrollTop = prevScrollTop;
+      if (scroller && prevScrollerTop != null) scroller.scrollTop = prevScrollerTop;
     });
   };
 
@@ -2197,6 +2203,20 @@ export default function KaraokePage() {
                     title="5초 뒤로"
                   >
                     −5s
+                  </button>
+                  <button
+                    onClick={() => jumpSeconds(-1)}
+                    className="px-2 py-1 rounded-md border border-zinc-700 text-xs hover:bg-zinc-800"
+                    title="1초 뒤로"
+                  >
+                    −1s
+                  </button>
+                  <button
+                    onClick={() => jumpSeconds(1)}
+                    className="px-2 py-1 rounded-md border border-zinc-700 text-xs hover:bg-zinc-800"
+                    title="1초 앞으로"
+                  >
+                    +1s
                   </button>
                   <button
                     onClick={() => jumpSeconds(5)}
