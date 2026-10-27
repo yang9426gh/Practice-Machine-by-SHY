@@ -2,7 +2,7 @@
 
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
-import { Play, Pause } from "lucide-react";
+import { Play, Pause, ChevronUp, ChevronDown } from "lucide-react";
 
 const BACKEND = process.env.NEXT_PUBLIC_BACKEND_URL || (typeof window !== "undefined" ? window.location.origin : "http://localhost:8011");
 
@@ -1065,6 +1065,12 @@ export default function KaraokePage() {
   };
 
   const [semitones, setSemitones] = useState(0); // applied
+  // 표시 전용 코드 키 조절 (오디오 무관 — 화면의 코드만 이동). -11..+11, 저장 안 함.
+  // 리셋 조건: 곡 로드(loadFromUrl) / transpose 적용(우선권) / 앱 종료(자연 소멸)
+  const [keyAdj, setKeyAdj] = useState(0);
+  const keyAdjLabel =
+    keyAdj === 0 ? "0" : keyAdj > 0 ? `+${keyAdj}/-${12 - keyAdj}` : `${keyAdj}/+${12 + keyAdj}`;
+  const capoValue = ((-keyAdj % 12) + 12) % 12; // keyAdj -1→Capo 1, +1→Capo 11, 0→Capo 0
   const [semitonesPending, setSemitonesPending] = useState(0);
   const [transposing, setTransposing] = useState(false);
   const [transposePct, setTransposePct] = useState<number>(0);
@@ -1143,6 +1149,7 @@ export default function KaraokePage() {
       }
 
       setSemitones(next);
+      setKeyAdj(0); // transpose 우선권 — 표시 키 조절은 0/Capo 0으로 리셋 (표시 코드 = transpose만 적용된 상태)
       setTransposePct(100);
     } catch (e: any) {
       toast(`Transpose failed: ${String(e?.message || e)}`);
@@ -1543,6 +1550,7 @@ export default function KaraokePage() {
     // Reset transpose per requirement (library stores defaults)
     setSemitones(0);
     setSemitonesPending(0);
+    setKeyAdj(0); // 표시 키 조절도 리셋 — 같은 영상을 다시 불러와도 오리지널 키
 
     // Load saved meta (bpm/key) from Library if present — 새 곡 로드 시 이전 곡 값은 먼저 리셋
     setBpm("");
@@ -1909,15 +1917,42 @@ export default function KaraokePage() {
       {/* Chords strip — 영상 위 별도 영역 (코드 3줄: 이전/현재/다음, 현재줄은 시간에 맞춰 개별 코드 하이라이트) */}
       {chords && chordsShow ? (
         <div
-          className="flex-none flex items-center justify-center px-6 bg-black border-b border-zinc-900 overflow-hidden"
+          className="flex-none relative flex items-center justify-center px-6 bg-black border-b border-zinc-900 overflow-hidden"
           style={{ height: chordsBandH }}
         >
+          {/* 표시 코드 키 조절 — 영역 상단 우측 (▼ -1 / 숫자+Capo / ▲ +1, -11..+11) */}
+          <div className="absolute top-1.5 right-2 z-10 flex items-stretch gap-1 select-none">
+            <button
+              onClick={() => setKeyAdj((v) => Math.max(-11, v - 1))}
+              disabled={keyAdj <= -11}
+              className={`w-7 flex items-center justify-center rounded-md border ${keyAdj > -11 ? "border-zinc-700 text-zinc-300 hover:bg-zinc-900" : "border-zinc-800 text-zinc-600 cursor-not-allowed"}`}
+              title="표시 코드 -1 key"
+            >
+              <ChevronDown size={15} />
+            </button>
+            <button
+              onClick={() => setKeyAdj(0)}
+              className="min-w-[56px] px-1.5 py-0.5 rounded-md border border-zinc-800 hover:bg-zinc-900 flex flex-col items-center justify-center leading-none"
+              title="클릭하면 표시 키 리셋 (0 / Capo 0)"
+            >
+              <span className="text-[11px] font-mono text-zinc-200">{keyAdjLabel}</span>
+              <span className="text-[9px] text-zinc-500 mt-0.5">Capo {capoValue}</span>
+            </button>
+            <button
+              onClick={() => setKeyAdj((v) => Math.min(11, v + 1))}
+              disabled={keyAdj >= 11}
+              className={`w-7 flex items-center justify-center rounded-md border ${keyAdj < 11 ? "border-zinc-700 text-zinc-300 hover:bg-zinc-900" : "border-zinc-800 text-zinc-600 cursor-not-allowed"}`}
+              title="표시 코드 +1 key"
+            >
+              <ChevronUp size={15} />
+            </button>
+          </div>
           {chordActiveIdx >= 0 ? (
             <div className="max-w-[95%] space-y-1 text-center">
               {chordActiveIdx > 0 ? (
                 <div className="text-sm sm:text-base text-zinc-500 truncate">
                   {chords.lines[chordActiveIdx - 1].chords.map((c, ci) => (
-                    <span key={ci}>{transposeChordText(c.text, semitones)}{"  "}</span>
+                    <span key={ci}>{transposeChordText(c.text, semitones + keyAdj)}{"  "}</span>
                   ))}
                 </div>
               ) : null}
@@ -1933,14 +1968,14 @@ export default function KaraokePage() {
                           : "text-zinc-500/80"
                     }
                   >
-                    {transposeChordText(c.text, semitones)}
+                    {transposeChordText(c.text, semitones + keyAdj)}
                   </span>
                 ))}
               </div>
               {chordActiveIdx + 1 < chords.lines.length ? (
                 <div className="text-sm sm:text-base text-zinc-500 truncate">
                   {chords.lines[chordActiveIdx + 1].chords.map((c, ci) => (
-                    <span key={ci}>{transposeChordText(c.text, semitones)}{"  "}</span>
+                    <span key={ci}>{transposeChordText(c.text, semitones + keyAdj)}{"  "}</span>
                   ))}
                 </div>
               ) : null}
