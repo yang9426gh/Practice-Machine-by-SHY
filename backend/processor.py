@@ -211,6 +211,7 @@ def separate_stems(
         "demucs.separate",
         "--name",
         model_name,
+        "--flac",  # 무손실 압축 저장 (WAV 대비 ~50%, 품질 동일)
         "-o",
         output_dir,
     ]

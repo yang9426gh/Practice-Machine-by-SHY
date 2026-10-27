@@ -152,14 +152,20 @@ def task_id_for_url(url: str) -> str:
 def output_paths(task_id: str):
     out_dir = os.path.join(DATA_DIR, task_id)
     # legacy paths (2-stem). 6-stem will be discovered dynamically via find_stems().
-    vocals = os.path.join(out_dir, "htdemucs", "original", "vocals.wav")
-    no_vocals = os.path.join(out_dir, "htdemucs", "original", "no_vocals.wav")
+    # flac 우선, 레거시 wav 폴백 (6-stem)
+    orig_dir = os.path.join(out_dir, "htdemucs", "original")
+    vocals = os.path.join(orig_dir, "vocals.flac")
+    if not os.path.exists(vocals):
+        vocals = os.path.join(orig_dir, "vocals.wav")
+    no_vocals = os.path.join(orig_dir, "no_vocals.flac")
+    if not os.path.exists(no_vocals):
+        no_vocals = os.path.join(orig_dir, "no_vocals.wav")
     video = os.path.join(out_dir, "video.mp4")
     return out_dir, vocals, no_vocals, video
 
 
 def find_stems(out_dir: str) -> dict[str, str]:
-    """Return {stem: wav_path} from demucs output."""
+    """Return {stem: audio_path} from demucs output. Prefers .flac, falls back to .wav (legacy)."""
     candidates = []
     m = os.environ.get("HOLY_DEMUCS_MODEL", "htdemucs_6s")
     candidates.append(os.path.join(out_dir, m, "original"))
@@ -169,8 +175,13 @@ def find_stems(out_dir: str) -> dict[str, str]:
         if os.path.isdir(c):
             stems = {}
             for fn in os.listdir(c):
-                if fn.lower().endswith(".wav"):
+                low = fn.lower()
+                if low.endswith(".flac"):
                     stems[os.path.splitext(fn)[0]] = os.path.join(c, fn)
+                elif low.endswith(".wav"):
+                    # .wav는 동명 .flac이 없을 때만 (레거시 폴백)
+                    if os.path.splitext(fn)[0] not in stems:
+                        stems[os.path.splitext(fn)[0]] = os.path.join(c, fn)
             if stems:
                 return stems
     return {}
@@ -877,8 +888,12 @@ async def presets_delete(preset_id: str):
 
 def transposed_paths(task_id: str, semitones: int):
     out_dir = os.path.join(DATA_DIR, task_id, f"transpose_{semitones:+d}")
-    vocals = os.path.join(out_dir, "vocals.wav")
-    no_vocals = os.path.join(out_dir, "no_vocals.wav")
+    # 입력이 flac이면 flac으로 출력 (ffmpeg은 확장자로 코덱 결정)
+    base_dir, base_v, base_m, _video_file = output_paths(task_id)
+    v_ext = os.path.splitext(base_v)[1] or ".flac"
+    m_ext = os.path.splitext(base_m)[1] or ".flac"
+    vocals = os.path.join(out_dir, f"vocals{v_ext}")
+    no_vocals = os.path.join(out_dir, f"no_vocals{m_ext}")
     return out_dir, vocals, no_vocals
 
 
@@ -1012,11 +1027,12 @@ async def transpose(task_id: str, semitones: int = 0):
         output_dir, vocals_file, no_vocals_file, _video_file = output_paths(task_id)
         if not (os.path.exists(vocals_file) and os.path.exists(no_vocals_file)):
             raise HTTPException(status_code=404, detail="Base audio not ready")
+        base = os.path.basename(output_dir)
         return {
             "task_id": task_id,
             "semitones": 0,
-            "vocals": f"/audio/{os.path.basename(output_dir)}/htdemucs/original/vocals.wav",
-            "no_vocals": f"/audio/{os.path.basename(output_dir)}/htdemucs/original/no_vocals.wav",
+            "vocals": f"/audio/{base}/htdemucs/original/{os.path.basename(vocals_file)}",
+            "no_vocals": f"/audio/{base}/htdemucs/original/{os.path.basename(no_vocals_file)}",
         }
 
     # ensure_transposed runs rubberband/ffmpeg and can block; run it off the event loop
@@ -1025,8 +1041,8 @@ async def transpose(task_id: str, semitones: int = 0):
     return {
         "task_id": task_id,
         "semitones": int(semitones),
-        "vocals": f"/audio/{rel}/vocals.wav",
-        "no_vocals": f"/audio/{rel}/no_vocals.wav",
+        "vocals": f"/audio/{rel}/{os.path.basename(tv)}",
+        "no_vocals": f"/audio/{rel}/{os.path.basename(tm)}",
     }
 
 

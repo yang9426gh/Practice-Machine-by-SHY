@@ -100,7 +100,9 @@ def ensure_transposed_stems(
     for name, src in items:
         if name == "drums":
             continue
-        dst = os.path.join(out_dir, f"{name}.wav")
+        # 출력 확장자는 소스 따라감 (flac→flac, wav→wav). ffmpeg/rubberband 확장자 기반 코덱
+        ext = os.path.splitext(src)[1] or ".flac"
+        dst = os.path.join(out_dir, f"{name}{ext}")
         rel_map[name] = os.path.relpath(dst, data_dir)
         if os.path.exists(dst) and os.path.getsize(dst) > 1024:
             continue
