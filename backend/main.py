@@ -1096,6 +1096,57 @@ async def lyrics_delete(video_id: str):
     return {"ok": True}
 
 
+# -----------------------------
+# Chords (코드악보) — 직접 입력/편집 전용 (외부 DB 없음)
+# -----------------------------
+from chords_store import parse_chords, serialize_chords, load_chords, save_chords
+from db import delete_preset_chords
+
+
+@app.get("/chords/{video_id}")
+async def chords_get(video_id: str):
+    """저장된 코드 반환. 없으면 404. lines는 줄 단위 그룹핑: [{time, chords:[{time,text}]}]"""
+    text = load_chords(DATA_DIR, video_id)
+    if text is None:
+        raise HTTPException(status_code=404, detail="no chords saved")
+    parsed = parse_chords(text)
+    return {
+        "video_id": video_id,
+        "lrc": text,
+        "meta": parsed["meta"],
+        "lines": parsed["lines"],
+        "offset_ms": int(parsed["meta"].get("offset", 0) or 0),
+    }
+
+
+@app.put("/chords/{video_id}")
+async def chords_put(video_id: str, payload: dict = Body(default={})):  # noqa: B008
+    """코드 LRC 텍스트 저장. body: {lrc: "..."} 또는 {lines:[...], meta:{...}}"""
+    lrc_text = payload.get("lrc")
+    if lrc_text is None:
+        lines = payload.get("lines")
+        if lines is None:
+            raise HTTPException(status_code=400, detail="provide 'lrc' or 'lines'")
+        lrc_text = serialize_chords(payload.get("meta") or {}, lines)
+    if not str(lrc_text).strip():
+        raise HTTPException(status_code=400, detail="empty chords")
+    save_chords(DATA_DIR, video_id, str(lrc_text))
+    parsed = parse_chords(str(lrc_text))
+    return {
+        "ok": True,
+        "lines": parsed["lines"],
+        "offset_ms": int(parsed["meta"].get("offset", 0) or 0),
+    }
+
+
+@app.delete("/chords/{video_id}")
+async def chords_delete(video_id: str):
+    if load_chords(DATA_DIR, video_id) is None:
+        raise HTTPException(status_code=404, detail="no chords saved")
+    delete_preset_chords(DATA_DIR, video_id)
+    return {"ok": True}
+
+
 @app.post("/lyrics/{video_id}/stamp")
 async def lyrics_stamp(video_id: str, payload: dict = Body(default={})):  # noqa: B008
     """빈 스탬프 찍기 — 재생 중 현재 위치의 타임스탬프를 기록.

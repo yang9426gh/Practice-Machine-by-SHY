@@ -66,6 +66,7 @@ def init_db(data_dir: str) -> None:
             ("key_tonic", "ALTER TABLE presets ADD COLUMN key_tonic TEXT"),
             ("key_mode", "ALTER TABLE presets ADD COLUMN key_mode TEXT"),
             ("lyrics_lrc", "ALTER TABLE presets ADD COLUMN lyrics_lrc TEXT"),
+            ("chords_lrc", "ALTER TABLE presets ADD COLUMN chords_lrc TEXT"),
         ]:
             if name not in pcols:
                 con.execute(ddl)
@@ -253,6 +254,72 @@ def set_preset_lyrics(data_dir: str, video_id: str, lrc_text: Optional[str]) -> 
                 "UPDATE presets SET lyrics_lrc=? WHERE video_id=?",
                 (lrc_text, video_id),
             )
+        con.commit()
+        return cur.rowcount
+    finally:
+        con.close()
+
+
+def get_preset_chords(data_dir: str, video_id: str) -> Optional[str]:
+    """라이브러리 DB에서 코드 LRC 원문 조회 (video_id 기준)."""
+    con = sqlite3.connect(db_path(data_dir))
+    con.row_factory = sqlite3.Row
+    try:
+        row = con.execute(
+            "SELECT chords_lrc FROM presets WHERE video_id=? AND chords_lrc IS NOT NULL",
+            (video_id,),
+        ).fetchone()
+        return row["chords_lrc"] if row else None
+    finally:
+        con.close()
+
+
+def set_preset_chords(data_dir: str, video_id: str, lrc_text: Optional[str]) -> int:
+    """라이브러리 DB에 코드 LRC 원문 저장. 해당 video_id 프리셋 전체에 적용.
+
+    프리셋이 아직 없으면 코드 전용 임시 프리셋을 자동 생성 — 실곡 로드되면
+    video_id로 묶여 함께 갱신됨. lrc_text=None 이면 아무것도 하지 않음.
+    """
+    if lrc_text is None:
+        return 0
+    con = sqlite3.connect(db_path(data_dir))
+    try:
+        cur = con.execute(
+            "UPDATE presets SET chords_lrc=?, updated_at=strftime('%s','now') WHERE video_id=?",
+            (lrc_text, video_id),
+        )
+        if cur.rowcount == 0:
+            con.execute(
+                """
+                INSERT INTO presets(id, name, video_id, chords_lrc)
+                VALUES(?, ?, ?, ?)
+                ON CONFLICT(id) DO UPDATE SET chords_lrc=excluded.chords_lrc,
+                  updated_at=strftime('%s','now');
+                """,
+                (f"chords-{video_id}", video_id, video_id, lrc_text),
+            )
+            cur = con.execute(
+                "UPDATE presets SET chords_lrc=? WHERE video_id=?",
+                (lrc_text, video_id),
+            )
+        con.commit()
+        return cur.rowcount
+    finally:
+        con.close()
+
+
+def delete_preset_chords(data_dir: str, video_id: str) -> int:
+    """해당 video_id의 모든 프리셋에서 코드 제거 (DB). 반환: 갱신 행 수.
+
+    코드 전용 임시 프리셋(chords-<video_id>)은 실곡 로드 전 만들어진 것이라
+    코드 삭제 시 함께 정리 (빈 껍데기가 라이브러리에 남지 않도록).
+    """
+    con = sqlite3.connect(db_path(data_dir))
+    try:
+        cur = con.execute(
+            "UPDATE presets SET chords_lrc=NULL WHERE video_id=?", (video_id,)
+        )
+        con.execute("DELETE FROM presets WHERE id=?", (f"chords-{video_id}",))
         con.commit()
         return cur.rowcount
     finally:

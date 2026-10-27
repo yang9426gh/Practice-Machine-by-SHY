@@ -17,7 +17,42 @@ type LyricsState = {
   source?: string;
 } | null;
 
+type ChordEv = { time: number; text: string };
+type ChordLine = { time: number; chords: ChordEv[] };
+type ChordsState = {
+  lines: ChordLine[];      // 줄 단위 그룹핑 — 같은 줄의 코드들은 한 줄로 표시
+  offsetMs: number;
+  lrc: string;
+  source?: string;
+} | null;
+
 // Jobs UI removed
+
+// ---- 코드 트랜스포즈 표시 ----
+// 알파벳 루트(A~G, 선택적 #/b)만 세미톤 이동. m/M/dim/aug/7/9 등 품질 표기는 그대로 유지.
+const CHROMATIC_SHARP = ["C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B"];
+const CHROMATIC_FLAT = ["C", "Db", "D", "Eb", "E", "F", "Gb", "G", "Ab", "A", "Bb", "B"];
+const transposeChordText = (text: string, delta: number): string => {
+  if (!delta) return text;
+  // 슬래시 코드: "Am7/C" → 루트 "Am7" + 베이스 "C" 각각 처리
+  return text
+    .split("/")
+    .map((part) => {
+      const m = part.match(/^([A-G])([#b♯♭]?)(.*)$/s);
+      if (!m) return part;
+      const [, root, acc, rest] = m;
+      let idx = CHROMATIC_SHARP.indexOf(root.toUpperCase());
+      if (acc === "#" || acc === "♯") idx += 1;
+      else if (acc === "b" || acc === "♭") idx -= 1;
+      if (idx < 0) return part;
+      const shifted = (((idx + delta) % 12) + 12) % 12;
+      // 원래 플랫 선호(예: Eb, Bb, Db)면 플랫 표기 유지, 아니면 샤프 표기
+      const preferFlat = acc === "b" || acc === "♭";
+      const name = preferFlat ? CHROMATIC_FLAT[shifted] : CHROMATIC_SHARP[shifted];
+      return `${name}${rest}`;
+    })
+    .join("/");
+};
 
 type Preset = {
   id: string;
@@ -269,6 +304,146 @@ export default function KaraokePage() {
     } catch {}
   };
 
+
+  // ---- Chords (코드악보) — 직접 입력 전용, 가사와 동일한 LRC식 타임스탬프 ----
+  const [chords, setChords] = useState<ChordsState>(null);
+  const [chordsShow, setChordsShow] = useState(true);          // 코드 스트립 on/off
+  const [chordsOpen, setChordsOpen] = useState(false);         // 모달: 만들기/편집
+  const [chordsMode, setChordsMode] = useState<"create" | "edit">("create");
+  const [chordsText, setChordsText] = useState("");
+  const [chordsSaving, setChordsSaving] = useState(false);
+
+  // ---- Chords 스트립 높이 (영상 위 밴드, px) ----
+  const [chordsBandH, setChordsBandH] = useState(88);
+
+  useEffect(() => {
+    try {
+      const raw = window.localStorage.getItem("karaoke_ui_settings_v1");
+      const s = raw ? JSON.parse(raw) : {};
+      if (typeof s.chordsBandH === "number" && s.chordsBandH >= 56 && s.chordsBandH <= 240)
+        setChordsBandH(s.chordsBandH);
+    } catch {}
+  }, []);
+
+  const setChordsBand = (h: number) => {
+    const v = Math.min(240, Math.max(56, Math.round(h)));
+    setChordsBandH(v);
+    try {
+      const raw = window.localStorage.getItem("karaoke_ui_settings_v1");
+      const s = raw ? JSON.parse(raw) : {};
+      s.chordsBandH = v;
+      window.localStorage.setItem("karaoke_ui_settings_v1", JSON.stringify(s));
+    } catch {}
+  };
+
+  // 현재 줄 (가사와 동일 로직 — offset 적용)
+  const chordActiveIdx = React.useMemo(() => {
+    if (!chordsShow || !chords || chords.lines.length === 0) return -1;
+    const t = (isScrubbing ? scrubPos : uiPos) - (chords.offsetMs || 0) / 1000;
+    let idx = -1;
+    for (let i = 0; i < chords.lines.length; i++) {
+      if (chords.lines[i].time <= t + 0.02) idx = i;
+      else break;
+    }
+    return idx;
+  }, [chords, chordsShow, uiPos, isScrubbing, scrubPos]);
+
+  // 현재 줄 안에서 하이라이트할 코드 인덱스
+  const chordInLineIdx = React.useMemo(() => {
+    if (chordActiveIdx < 0 || !chords) return -1;
+    const t = (isScrubbing ? scrubPos : uiPos) - (chords.offsetMs || 0) / 1000;
+    const arr = chords.lines[chordActiveIdx].chords;
+    let idx = -1;
+    for (let i = 0; i < arr.length; i++) {
+      if (arr[i].time <= t + 0.02) idx = i;
+      else break;
+    }
+    return idx;
+  }, [chords, chordActiveIdx, uiPos, isScrubbing, scrubPos]);
+
+  const openChordsEditor = async (mode: "create" | "edit") => {
+    if (mode === "edit" && videoId) {
+      // 최신 원문을 서버에서 다시 읽어 편집기에 반영
+      try {
+        const r = await fetch(`${BACKEND}/chords/${videoId}`);
+        if (r.ok) setChordsText((await r.json()).lrc || "");
+        else setChordsText(chords?.lrc || "");
+      } catch {
+        setChordsText(chords?.lrc || "");
+      }
+    } else {
+      setChordsText("");
+    }
+    setChordsMode(mode);
+    setChordsOpen(true);
+  };
+
+  const chordsSave = async () => {
+    const text = chordsText.trim();
+    if (!text) return;
+    if (!/\[\d{1,3}:\d{1,2}/.test(text)) {
+      toast("타임스탬프가 없습니다 — [mm:ss.xx] 코드 형식 필요");
+      return;
+    }
+    setChordsSaving(true);
+    try {
+      const r = await fetch(`${BACKEND}/chords/${videoId}`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ lrc: text }),
+      });
+      const j = await r.json();
+      if (r.ok && j.lines?.length) {
+        setChords({ lines: j.lines, offsetMs: j.offset_ms || 0, lrc: text, source: chords?.source || "직접 입력" });
+        setChordsShow(true);
+        setChordsOpen(false);
+        toast(`코드 저장 완료 (${j.lines.length}줄)`);
+      } else {
+        toast(`저장 실패: ${j.detail || "?"}`);
+      }
+    } catch (e: any) {
+      toast(`저장 실패: ${String(e?.message || e)}`);
+    } finally {
+      setChordsSaving(false);
+    }
+  };
+
+  // 코드용 스탬프: 커서 위치에 [시각] 삽입 — 줄바꿈 없이 인라인 (연타로 같은 줄에 여러 코드)
+  const stampChordAtCursor = () => {
+    const el = document.getElementById("chords-edit-area") as HTMLTextAreaElement | null;
+    const t = Math.max(0, currentPositionLive());
+    const mm = Math.floor(t / 60);
+    const ss = t - mm * 60;
+    const stamp = `[${String(mm).padStart(2, "0")}:${ss.toFixed(2).padStart(5, "0")}]`;
+    if (!el) {
+      setChordsText((prev) => (prev ? `${prev.replace(/\s*$/, "")} ${stamp} ` : `${stamp} `));
+      return;
+    }
+    const start = el.selectionStart ?? chordsText.length;
+    const end = el.selectionEnd ?? start;
+    const text = chordsText;
+    const before = text.slice(0, start);
+    const after = text.slice(end);
+    // 바로 앞이 스탬프만 있으면 재찍기(교체) — 밀린 스탬프 정리용
+    const m = before.match(/\[\d{1,3}:\d{1,2}(?:[.:]\d{1,3})?\]\s*$/);
+    let newText: string;
+    let caret: number;
+    if (m) {
+      const s0 = start - m[0].length;
+      newText = text.slice(0, s0) + stamp + " " + after;
+      caret = s0 + stamp.length + 1;
+    } else {
+      const prevCh = start > 0 ? text[start - 1] : "\n";
+      const pad = start === 0 || /\s/.test(prevCh) ? "" : " ";
+      newText = before + pad + stamp + " " + after;
+      caret = start + pad.length + stamp.length + 1;
+    }
+    setChordsText(newText);
+    requestAnimationFrame(() => {
+      el.focus();
+      el.setSelectionRange(caret, caret);
+    });
+  };
 
   const videoAreaRef = useRef<HTMLDivElement | null>(null);
   const [videoH, setVideoH] = useState<number | null>(null);
@@ -1458,6 +1633,18 @@ export default function KaraokePage() {
           }
         })
         .catch(() => {});
+
+      // 저장된 코드 있으면 자동 로드
+      fetch(`${BACKEND}/chords/${id}`)
+        .then((r) => (r.ok ? r.json() : null))
+        .then((j) => {
+          if (j && j.lines?.length) {
+            setChords({ lines: j.lines, offsetMs: j.offset_ms || 0, lrc: j.lrc, source: "saved" });
+          } else {
+            setChords(null);
+          }
+        })
+        .catch(() => {});
     };
 
     // If backend already has cached output, it may return completed immediately.
@@ -1677,6 +1864,51 @@ export default function KaraokePage() {
           </button>
         </div>
       </div>
+
+      {/* Chords strip — 영상 위 별도 영역 (코드 3줄: 이전/현재/다음, 현재줄은 시간에 맞춰 개별 코드 하이라이트) */}
+      {chords && chordsShow ? (
+        <div
+          className="flex-none flex items-center justify-center px-6 bg-black border-b border-zinc-900 overflow-hidden"
+          style={{ height: chordsBandH }}
+        >
+          {chordActiveIdx >= 0 ? (
+            <div className="max-w-[95%] space-y-1 text-center">
+              {chordActiveIdx > 0 ? (
+                <div className="text-sm sm:text-base text-zinc-500 truncate">
+                  {chords.lines[chordActiveIdx - 1].chords.map((c, ci) => (
+                    <span key={ci}>{transposeChordText(c.text, semitones)}{"  "}</span>
+                  ))}
+                </div>
+              ) : null}
+              <div className="flex flex-wrap justify-center items-baseline gap-x-6 gap-y-0.5 text-xl sm:text-3xl font-bold break-keep">
+                {chords.lines[chordActiveIdx].chords.map((c, ci) => (
+                  <span
+                    key={`${ci}-${c.time}`}
+                    className={
+                      ci === chordInLineIdx
+                        ? "text-white border-b-2 border-emerald-400"
+                        : ci < chordInLineIdx
+                          ? "text-zinc-200/90"
+                          : "text-zinc-500/80"
+                    }
+                  >
+                    {transposeChordText(c.text, semitones)}
+                  </span>
+                ))}
+              </div>
+              {chordActiveIdx + 1 < chords.lines.length ? (
+                <div className="text-sm sm:text-base text-zinc-500 truncate">
+                  {chords.lines[chordActiveIdx + 1].chords.map((c, ci) => (
+                    <span key={ci}>{transposeChordText(c.text, semitones)}{"  "}</span>
+                  ))}
+                </div>
+              ) : null}
+            </div>
+          ) : (
+            <div className="text-zinc-700 text-lg">♪</div>
+          )}
+        </div>
+      ) : null}
 
       {/* Video / status area (높이: 위/아래 핸들 드래그로 조절 가능) */}
       <div
@@ -1943,6 +2175,27 @@ export default function KaraokePage() {
                     </button>
                   </div>
                 </>
+              ) : null}
+            </div>
+
+            {/* Chords button + edit */}
+            <div className="flex items-center gap-2">
+              <button
+                onClick={() => (chords ? setChordsShow((v) => !v) : openChordsEditor("create"))}
+                disabled={status !== "completed"}
+                title={chords ? "코드 표시 on/off" : "코드 만들기"}
+                className={`px-3 py-2 rounded-lg border text-sm ${status === "completed" ? "border-zinc-700 hover:bg-zinc-900" : "border-zinc-800 text-zinc-600 cursor-not-allowed"} ${chords && chordsShow ? "border-emerald-700 text-emerald-200" : ""}`}
+              >
+                {chords ? (chordsShow ? "코드 숨기기" : "코드 보기") : "코드 만들기"}
+              </button>
+              {chords ? (
+                <button
+                  onClick={() => openChordsEditor("edit")}
+                  className="px-2 py-2 rounded-lg border border-zinc-700 text-sm hover:bg-zinc-900"
+                  title="코드 편집"
+                >
+                  편집
+                </button>
               ) : null}
             </div>
 
@@ -2427,6 +2680,79 @@ export default function KaraokePage() {
                 </div>
               </div>
             ) : null}
+          </div>
+        </div>
+      ) : null}
+
+      {chordsOpen ? (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-4" onClick={() => setChordsOpen(false)}>
+          <div
+            className="w-full max-w-lg rounded-2xl border border-zinc-800 bg-zinc-950 p-5 space-y-4 max-h-[85vh] overflow-auto"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="flex items-center justify-between">
+              <div className="text-lg font-bold text-zinc-100">{chordsMode === "edit" ? "코드 편집" : "코드 만들기"}</div>
+              <button onClick={() => setChordsOpen(false)} className="text-zinc-500 hover:text-zinc-200 text-sm px-2">✕</button>
+            </div>
+
+            <div className="text-xs text-zinc-500">
+              형식: <code className="text-zinc-400">[00:11.82] Am[00:12.44] Bm[00:13.82] C7</code> — 같은 줄에 코드 여러 개 나열 (표시될 때 한 줄로 묶임). 줄바꿈 = 표시 줄 구분.
+            </div>
+            <textarea
+              id="chords-edit-area"
+              className="w-full h-64 bg-zinc-900 border border-zinc-700 rounded-lg px-3 py-2 text-sm font-mono"
+              placeholder={"[00:07.82] Am[00:08.44] Bm[00:09.82] C7\n[00:14.82] F[00:15.44] G[00:16.82] Am"}
+              value={chordsText}
+              onChange={(e) => setChordsText(e.target.value)}
+            />
+            {/* Transport: 재생 컨트롤 + 커서 위치 코드 스탬프 */}
+            <div className="flex items-center gap-2 rounded-lg border border-zinc-800 bg-zinc-900/60 px-2 py-1.5">
+              <button
+                onClick={togglePlay}
+                className="px-2.5 py-1 rounded-md border border-zinc-700 text-xs hover:bg-zinc-800"
+                title={isPlaying ? "일시정지" : "재생"}
+              >
+                {isPlaying ? "⏸" : "▶"}
+              </button>
+              <button onClick={() => jumpSeconds(-5)} className="px-2 py-1 rounded-md border border-zinc-700 text-xs hover:bg-zinc-800" title="5초 뒤로">−5s</button>
+              <button onClick={() => jumpSeconds(-1)} className="px-2 py-1 rounded-md border border-zinc-700 text-xs hover:bg-zinc-800" title="1초 뒤로">−1s</button>
+              <button onClick={() => jumpSeconds(1)} className="px-2 py-1 rounded-md border border-zinc-700 text-xs hover:bg-zinc-800" title="1초 앞으로">+1s</button>
+              <button onClick={() => jumpSeconds(5)} className="px-2 py-1 rounded-md border border-zinc-700 text-xs hover:bg-zinc-800" title="5초 앞으로">+5s</button>
+              <div className="text-[11px] font-mono text-zinc-400 w-12 text-center">
+                {fmtTime(currentPositionLive())}
+              </div>
+              <div className="flex-1" />
+              <button
+                onClick={stampChordAtCursor}
+                className="px-2 py-1 rounded-md border border-emerald-700 text-emerald-200 text-xs hover:bg-emerald-950/30"
+                title="텍스트 커서 위치에 현재 재생 시간의 타임스탬프 삽입 (인라인 — 연타로 같은 줄에 여러 코드)"
+              >
+                ⏱ 스탬프
+              </button>
+            </div>
+            <div className="flex gap-2">
+              <button
+                onClick={chordsSave}
+                disabled={chordsSaving}
+                className="flex-1 px-3 py-2 rounded-lg border border-emerald-700 text-emerald-200 text-sm hover:bg-emerald-950/30 disabled:opacity-50"
+              >
+                저장
+              </button>
+              {chords ? (
+                <button
+                  onClick={async () => {
+                    if (!confirm("저장된 코드를 삭제할까요?")) return;
+                    await fetch(`${BACKEND}/chords/${videoId}`, { method: "DELETE" });
+                    setChords(null);
+                    setChordsOpen(false);
+                    toast("코드 삭제됨");
+                  }}
+                  className="px-3 py-2 rounded-lg border border-red-900/60 text-red-300 text-sm"
+                >
+                  삭제
+                </button>
+              ) : null}
+            </div>
           </div>
         </div>
       ) : null}
