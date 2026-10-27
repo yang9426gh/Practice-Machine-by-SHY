@@ -886,6 +886,9 @@ async def presets(limit: int = 100, sort: str = "recent"):
                 **it,
                 "task_id": tid,
                 "video_ready": bool(tid and os.path.exists(video_path)),
+                # 가사/코드 보유 여부 배지용 (본문은 /lyrics API로 별도 로드)
+                "has_lyrics": bool(it.get("lyrics_lrc")),
+                "has_chords": bool(it.get("chords_lrc")),
                 "job": {
                     "status": status,
                     "stage": stage,

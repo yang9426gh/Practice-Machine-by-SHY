@@ -15,6 +15,8 @@ type Preset = {
   bpm?: number | null;
   key_tonic?: string | null;
   key_mode?: string | null;
+  has_lyrics?: boolean;
+  has_chords?: boolean;
 };
 
 type QueueItem = {
@@ -358,6 +360,12 @@ export default function LibraryPage() {
                       <div className="text-[11px] px-2 py-0.5 rounded-full border border-zinc-800 text-zinc-300">
                         {p.key_tonic}{p.key_mode === "minor" ? "m" : "M"}
                       </div>
+                    ) : null}
+                    {p.has_lyrics ? (
+                      <div className="text-[11px] px-2 py-0.5 rounded-full border border-violet-800/60 bg-violet-950/30 text-violet-300">가사</div>
+                    ) : null}
+                    {p.has_chords ? (
+                      <div className="text-[11px] px-2 py-0.5 rounded-full border border-emerald-800/60 bg-emerald-950/30 text-emerald-300">코드</div>
                     ) : null}
                   </div>
                 </div>
