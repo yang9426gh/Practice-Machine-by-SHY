@@ -272,6 +272,236 @@ def push_history(task_id: str, url: str, status: str, stage: str | None, progres
     )
 
 
+# -----------------------------
+# Queue system bridge
+# -----------------------------
+_QUEUE_PROGRESS_CB = None  # queue_system._on_progress 주입용
+
+
+def set_queue_cb(cb) -> None:
+    global _QUEUE_PROGRESS_CB
+    _QUEUE_PROGRESS_CB = cb
+
+
+def _queue_notify(video_id: str, stage: str, progress: int) -> None:
+    if _QUEUE_PROGRESS_CB:
+        try:
+            _QUEUE_PROGRESS_CB(video_id, stage, int(progress))
+        except Exception:
+            pass
+
+
+def run_pipeline_sync(url: str, on_stage=None) -> str:
+    """큐 워커용 동기 파이프라인. task_id 반환. on_stage(stage, progress) 콜백 지원.
+
+    run_pipeline과 동일 단계(영상→오디오→분리→DB등록)를 수행하되,
+    완료 시 presets에도 자동 등록한다.
+    """
+    import queue_system
+
+    task_id = task_id_for_url(url)
+    output_dir, _v, _m, _video = output_paths(task_id)
+    os.makedirs(output_dir, exist_ok=True)
+    vid = video_id_from_url(url) or url.strip()
+    canon = canonical_watch_url(url)
+
+    def _stage(stage: str, progress: int = 0):
+        set_task(task_id, status="processing", stage=stage, progress=progress)
+        if on_stage:
+            try:
+                on_stage(stage, progress)
+            except Exception:
+                pass
+
+    def _prog(p: int):
+        # 현재 stage 유지한 채 progress만 갱신
+        with TASKS_LOCK:
+            cur = TASKS.get(task_id, {})
+            stage = cur.get("stage", "processing")
+        _stage(stage, p)
+
+    if is_cancelled(task_id):
+        raise RuntimeError("cancelled")
+
+    _stage("downloading_video", 0)
+    try:
+        download_youtube_video(
+            canon,
+            output_dir,
+            max_height=720,
+            cancel_cb=lambda: is_cancelled(task_id),
+            proc_cb=lambda p: register_proc(task_id, p),
+            progress_cb=_prog,
+        )
+    finally:
+        clear_proc(task_id)
+
+    if is_cancelled(task_id):
+        raise RuntimeError("cancelled")
+
+    _stage("downloading_audio", 0)
+    try:
+        orig_file = download_youtube_audio(
+            canon,
+            output_dir,
+            cancel_cb=lambda: is_cancelled(task_id),
+            proc_cb=lambda p: register_proc(task_id, p),
+            progress_cb=_prog,
+        )
+    finally:
+        clear_proc(task_id)
+
+    if is_cancelled(task_id):
+        raise RuntimeError("cancelled")
+
+    _stage("separating", 0)
+    try:
+        separate_stems(
+            orig_file,
+            output_dir,
+            task_id=task_id,
+            model_name=os.environ.get("HOLY_DEMUCS_MODEL", "htdemucs_6s"),
+            progress_cb=_prog,
+            cancel_cb=lambda: is_cancelled(task_id),
+            proc_cb=lambda p: register_proc(task_id, p),
+        )
+    finally:
+        clear_proc(task_id)
+
+    stems = find_stems(output_dir)
+    vocals_path = stems.get("vocals") or ""
+    no_vocals_path = stems.get("no_vocals") or stems.get("accompaniment") or ""
+    # 6-stem 모델은 no_vocals가 없음 — vocals만 있으면 성공
+    if not os.path.exists(vocals_path):
+        raise RuntimeError("stems missing after separation")
+
+    # DB 등록 (tracks) + 메타 수집
+    title = artist = cover_url = None
+    if vid:
+        try:
+            wp = YTM.get_watch_playlist(vid)
+            if wp.get("tracks"):
+                t = wp["tracks"][0]
+                title = t.get("title")
+                if t.get("artists"):
+                    artist = t["artists"][0].get("name")
+                thumbs = t.get("thumbnail") or []
+                if thumbs:
+                    cover_url = sorted(thumbs, key=lambda x: (x.get("width", 0), x.get("height", 0)))[-1].get("url")
+        except Exception:
+            pass
+        upsert_track(
+            DATA_DIR,
+            video_id=vid,
+            source_url=canon,
+            task_id=task_id,
+            title=title,
+            artist=artist,
+            cover_url=cover_url,
+            vocals_path=vocals_path,
+            no_vocals_path=no_vocals_path,
+        )
+        # presets 자동 등록 (큐로 추가된 곡 = 라이브러리에 즉시 표시)
+        try:
+            upsert_preset(
+                DATA_DIR,
+                id=vid,
+                name=title or vid,
+                source_url=canon,
+                video_id=vid,
+                title=title,
+                thumbnail_url=cover_url,
+                semitones=0,
+                master_volume=1.0,
+                vocal_volume=1.0,
+            )
+        except Exception:
+            pass
+        _queue_notify_progress(vid, "completed", 100)
+
+    set_task(task_id, status="completed", stage="completed", progress=100)
+    push_history(task_id, url, "completed", "completed", 100)
+    return task_id
+
+
+def _queue_notify_progress(video_id: str, stage: str, progress: int) -> None:
+    """큐 항목에 task 정보 연결 후 프리셋 등록 알림."""
+    pass  # presets 등록은 run_pipeline_sync 내부에서 직접 수행
+
+
+# -----------------------------
+# Queue API (라이브러리용 백그라운드 처리)
+# -----------------------------
+from queue_system import (  # noqa: E402
+    queue_add,
+    queue_list,
+    queue_remove,
+    queue_clear_completed,
+    MAX_QUEUE,
+)
+
+
+@app.get("/queue")
+async def get_queue():
+    return {"items": queue_list(), "max": MAX_QUEUE}
+
+
+@app.post("/queue")
+async def post_queue(url: str = "", name: str = "", thumbnail_url: str = ""):
+    vid = video_id_from_url(url)
+    if not vid:
+        raise HTTPException(status_code=400, detail="Invalid YouTube URL")
+
+    # 이미 처리 완료된 곡이면 큐 대신 즉시 완료 응답 (+ presets에 없으면 자동 등록)
+    canon = canonical_watch_url(url)
+    output_dir, _v, _m, _vf = output_paths(task_id_for_url(url))
+    if find_stems(output_dir):
+        try:
+            from db import get_preset
+            if not get_preset(DATA_DIR, vid):
+                title = thumb = None
+                try:
+                    wp = YTM.get_watch_playlist(vid)
+                    if wp.get("tracks"):
+                        t = wp["tracks"][0]
+                        title = t.get("title")
+                        thumbs = t.get("thumbnail") or []
+                        if thumbs:
+                            thumb = sorted(thumbs, key=lambda x: (x.get("width", 0), x.get("height", 0)))[-1].get("url")
+                except Exception:
+                    pass
+                upsert_preset(DATA_DIR, id=vid, name=name or title or vid,
+                              source_url=canon, video_id=vid, title=title,
+                              thumbnail_url=thumb or (thumbnail_url or None),
+                              semitones=0, master_volume=1.0, vocal_volume=1.0)
+        except Exception:
+            pass
+        return {"status": "completed", "video_id": vid, "queued": False}
+
+    try:
+        item = queue_add(vid, canon, name=name or None,
+                         thumbnail_url=thumbnail_url or None)
+    except ValueError as e:
+        if str(e) == "already_queued":
+            return {"status": "already_queued", "video_id": vid, "queued": True}
+        raise HTTPException(status_code=400, detail="Queue is full (max 5)")
+    return {"status": "queued", "video_id": vid, "queued": True, "item": item}
+
+
+@app.delete("/queue/{video_id}")
+async def delete_queue_item(video_id: str):
+    ok = queue_remove(video_id)
+    if not ok:
+        raise HTTPException(status_code=400, detail="Not removable (running items use /cancel)")
+    return {"ok": True}
+
+
+@app.post("/queue/clear-completed")
+async def clear_completed_queue():
+    n = queue_clear_completed()
+    return {"removed": n}
+
+
 def run_pipeline(url: str, output_dir: str, task_id: str):
     try:
         if is_cancelled(task_id):
