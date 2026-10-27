@@ -21,3 +21,4 @@ logs/
 .DS_Store
 backend/run.log
 backend/run.pid
+dist/
