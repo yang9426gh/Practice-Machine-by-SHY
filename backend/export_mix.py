@@ -2,9 +2,11 @@ import os
 import subprocess
 from typing import Dict, List, Tuple
 
+from ffmpeg_locate import ffmpeg_bin
 
-def _ffmpeg_bin() -> str:
-    return os.environ.get("HOLY_FFMPEG", "/opt/homebrew/bin/ffmpeg")
+
+def _ffmpeg() -> str:
+    return ffmpeg_bin()
 
 
 def mixdown_to_mp3(stems: Dict[str, str], gains: Dict[str, float], out_mp3: str, *, bitrate: str = "320k") -> str:
@@ -36,7 +38,7 @@ def mixdown_to_mp3(stems: Dict[str, str], gains: Dict[str, float], out_mp3: str,
     fc = ";".join(parts + [amix])
 
     cmd = [
-        _ffmpeg_bin(),
+        _ffmpeg(),
         "-y",
         *inputs,
         "-filter_complex",

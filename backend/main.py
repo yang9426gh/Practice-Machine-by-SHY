@@ -1,11 +1,13 @@
 from fastapi import FastAPI, BackgroundTasks
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
+from fastapi.responses import FileResponse
 from fastapi import HTTPException
 from fastapi import Body
 from starlette.concurrency import run_in_threadpool
 from pydantic import BaseModel
 import os
+import shutil
 import uuid
 import hashlib
 import threading
@@ -21,16 +23,9 @@ from rapidfuzz import fuzz
 YT = YouTubeTranscriptApi()
 YTM = YTMusic()
 
-import whisper
-
-# Optional: whisperx for better word-level alignment
-try:
-    import whisperx  # type: ignore
-except Exception:  # pragma: no cover
-    whisperx = None
-
-WHISPER_MODELS: dict[str, object] = {}
-WHISPER_LOCK = threading.Lock()
+# faster-whisper (openai-whisper 대체 — 4배 빠름, RAM 절반)
+import whisper_fw
+from ffmpeg_locate import ffmpeg_bin
 
 
 def wav_duration_seconds(path: str) -> float:
@@ -231,53 +226,32 @@ def align_lyrics_to_captions_lines(lyric_lines: list[str], phrases: list[dict]) 
     return out
 
 
-def get_whisper_model(name: str):
-    with WHISPER_LOCK:
-        m = WHISPER_MODELS.get(name)
-        if m is None:
-            m = whisper.load_model(name)
-            WHISPER_MODELS[name] = m
-        return m
+def whisperx_words(audio_path: str, model_name: str = "medium", lang: str | None = None) -> list[dict]:
+    """Word timestamps via faster-whisper (이전 whisperx 대체).
 
-
-def whisperx_words(audio_path: str, model_name: str = "medium", lang: str = "en") -> list[dict]:
-    """Return word timestamps using whisperx aligner if available.
-
-    WhisperX can sometimes collapse into filler tokens ("oh", "uh") on singing.
-    If the aligned words look degenerate, we fall back to openai-whisper.
+    노래에서 반복 필러("oh", "uh")로 붕괴하는 경우를 대비해 degeneracy 검사 후 폴백.
     """
-    if whisperx is None:
+    try:
+        result = whisper_fw.transcribe_with_words(audio_path, model_name=model_name, language=lang)
+    except Exception:
         return []
 
-    device = "cpu"
-    try:
-        wmodel = whisperx.load_model(model_name, device, compute_type="int8")
-        result = wmodel.transcribe(audio_path, language=lang)
-        align_model, metadata = whisperx.load_align_model(language_code=lang, device=device)
-        aligned = whisperx.align(result["segments"], align_model, metadata, audio_path, device)
+    words = whisper_fw.words_from_result(result)
 
-        words: list[dict] = []
-        toks: list[str] = []
-        for w in aligned.get("word_segments") or []:
-            ww = (w.get("word") or "").strip().lower()
-            words.append({"start": w.get("start"), "end": w.get("end"), "word": ww})
-            if ww and any(ch.isalpha() for ch in ww):
-                toks.append(ww)
-
-        # Degeneracy check: if too repetitive, don't trust whisperx words
-        if len(toks) >= 30:
-            from collections import Counter
+    # Degeneracy check: if too repetitive, don't trust the words
+    if len(words) >= 30:
+        from collections import Counter
+        toks = [(w.get("word") or "").strip().lower() for w in words]
+        toks = [t for t in toks if t and any(ch.isalpha() for ch in t)]
+        if toks:
             c = Counter(toks)
             top_tok, top_cnt = c.most_common(1)[0]
             uniq = len(c)
             top_ratio = top_cnt / max(1, len(toks))
-            # if top token dominates or uniqueness is too low, reject
             if top_ratio > 0.20 or uniq < 25:
                 return []
 
-        return words
-    except Exception:
-        return []
+    return words
 
 app = FastAPI()
 
@@ -580,24 +554,12 @@ def run_pipeline(url: str, output_dir: str, task_id: str):
         synced_path = None
         if lyric_lines and os.path.exists(vocals_path):
             model_name = os.environ.get("HOLY_WHISPER_MODEL", "base")
-            model = get_whisper_model(model_name)
             set_task(task_id, stage="transcribing", progress=25)
-            result = model.transcribe(
-                vocals_path,
-                fp16=False,
-                language="en",
-                task="transcribe",
-                temperature=0.0,
-                condition_on_previous_text=False,
-                word_timestamps=True,
-            )
+            result = whisper_fw.transcribe_with_words(vocals_path, model_name=model_name)
             segments = [{"start": s["start"], "end": s["end"], "text": s["text"]} for s in (result.get("segments") or [])]
 
             # gather word timestamps if available
-            words = []
-            for seg in (result.get("segments") or []):
-                for w in seg.get("words") or []:
-                    words.append({"start": w.get("start"), "end": w.get("end"), "word": w.get("word")})
+            words = whisper_fw.words_from_result(result)
 
             set_task(task_id, stage="aligning_lyrics", progress=0)
             if words:
@@ -1225,8 +1187,8 @@ def ensure_transposed(task_id: str, semitones: int):
 
     def run(src: str, dst: str):
         # Prefer Rubber Band (R3 engine + formant preservation) for much better quality.
-        rb = "/opt/homebrew/bin/rubberband"
-        if os.path.exists(rb):
+        rb = shutil.which("rubberband") or ""
+        if rb:
             # -3 fine engine, -F formant, --centre-focus for stereo, -q quiet
             subprocess.run(
                 [
@@ -1263,7 +1225,7 @@ def ensure_transposed(task_id: str, semitones: int):
         af = f"asetrate=44100*{factor:.8f},aresample=44100," + ",".join(at_filters)
         subprocess.run(
             [
-                "/opt/homebrew/bin/ffmpeg",
+                ffmpeg_bin(),
                 "-y",
                 "-i",
                 src,
@@ -1443,7 +1405,7 @@ def _resync_task(video_id: str, task_id: str, output_dir: str, vocals_path: str,
             import subprocess
             subprocess.run(
                 [
-                    "/opt/homebrew/bin/ffmpeg",
+                    ffmpeg_bin(),
                     "-y",
                     "-i",
                     src_audio,
@@ -1467,30 +1429,19 @@ def _resync_task(video_id: str, task_id: str, output_dir: str, vocals_path: str,
         if len(prompt) > 1200:
             prompt = prompt[:1200]
 
-        # First try whisperx word alignment (often better on original mix)
+        # faster-whisper: word timestamps on original mix (initial_prompt로 실제 가사 힌트)
         set_task(task_id, stage="transcribing", progress=25)
-        words = whisperx_words(whisper_in, model_name=model_name, lang="en")
+        result = whisper_fw.transcribe_with_words(
+            whisper_in,
+            model_name=model_name,
+            initial_prompt=prompt,
+        )
+        segments = [{"start": s["start"], "end": s["end"], "text": s["text"]} for s in (result.get("segments") or [])]
+        words = whisper_fw.words_from_result(result)
 
-        segments = []
-        if not words:
-            # fallback: openai-whisper (segments + optional word timestamps)
-            m = get_whisper_model(model_name)
-            result = m.transcribe(
-                whisper_in,
-                fp16=False,
-                language="en",
-                task="transcribe",
-                temperature=0.0,
-                condition_on_previous_text=False,
-                initial_prompt=prompt,
-                carry_initial_prompt=True,
-                word_timestamps=True,
-                verbose=False,
-            )
-            segments = [{"start": s["start"], "end": s["end"], "text": s["text"]} for s in (result.get("segments") or [])]
-            for seg in (result.get("segments") or []):
-                for w in seg.get("words") or []:
-                    words.append({"start": w.get("start"), "end": w.get("end"), "word": w.get("word")})
+        # Degenerate words면 폴백: words 비움 → segment 기반 정렬 사용
+        if words and not whisper_fw.words_ok(words):
+            words = []
 
         # Debug artifacts (so we stop guessing)
         try:
@@ -1635,6 +1586,35 @@ async def lyrics(video_id: str, source: str = "ytmusic"):
             raise HTTPException(status_code=404, detail=f"No transcript available: {e}")
 
     raise HTTPException(status_code=400, detail="source must be ytmusic or yt")
+
+
+# -----------------------------
+# Static frontend serving (Next.js out/ — 단일 프로세스 배포)
+# -----------------------------
+FRONTEND_DIST = os.environ.get(
+    "HOLY_FRONTEND_DIST",
+    os.path.join(os.path.dirname(__file__), "..", "frontend", "out"),
+)
+
+if os.path.isdir(FRONTEND_DIST):
+    assets_dir = os.path.join(FRONTEND_DIST, "_next")
+    if os.path.isdir(assets_dir):
+        app.mount("/_next", StaticFiles(directory=assets_dir), name="next_assets")
+
+    @app.get("/{full_path:path}", include_in_schema=False)
+    async def serve_spa(full_path: str):
+        # /library, /settings 등 클라이언트 라우트 → 해당 디렉터리 index.html
+        candidate = os.path.normpath(os.path.join(FRONTEND_DIST, full_path))
+        if full_path and candidate.startswith(os.path.abspath(FRONTEND_DIST)):
+            if os.path.isfile(candidate):
+                return FileResponse(candidate)
+            idx = os.path.join(candidate, "index.html")
+            if os.path.isfile(idx):
+                return FileResponse(idx)
+        fallback = os.path.join(FRONTEND_DIST, "index.html")
+        if os.path.isfile(fallback):
+            return FileResponse(fallback)
+        raise HTTPException(status_code=404, detail="frontend not built — run install.sh")
 
 
 if __name__ == "__main__":
