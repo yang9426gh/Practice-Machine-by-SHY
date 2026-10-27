@@ -2140,9 +2140,16 @@ export default function KaraokePage() {
         {fsMode ? (
           <div className="absolute inset-x-0 top-0 z-20 pointer-events-none">
             <div className="h-[33vh] flex flex-col items-center justify-center gap-2 bg-gradient-to-b from-black/70 via-black/40 to-transparent px-8 pt-4">
-              {/* 코드 (위) */}
+              {/* 코드 (위) — 현재줄 + 다음줄 미리보기 (일반 스트립과 동일 구조) */}
               {chords && chordsShow && chordActiveIdx >= 0 ? (
-                <div className="text-center">
+                <div className="text-center space-y-1">
+                  {chordActiveIdx > 0 ? (
+                    <div className="text-lg lg:text-xl text-zinc-500 truncate">
+                      {chords.lines[chordActiveIdx - 1].chords.map((c, ci) => (
+                        <span key={ci}>{transposeChordText(c.text, semitones + keyAdj)}{"  "}</span>
+                      ))}
+                    </div>
+                  ) : null}
                   <div className="flex flex-wrap justify-center items-baseline gap-x-8 text-4xl lg:text-5xl font-bold break-keep drop-shadow-lg">
                     {chords.lines[chordActiveIdx].chords.map((c, ci) => (
                       <span
@@ -2160,7 +2167,7 @@ export default function KaraokePage() {
                     ))}
                   </div>
                   {chordActiveIdx + 1 < chords.lines.length ? (
-                    <div className="text-xl lg:text-2xl text-zinc-400 mt-2 truncate">
+                    <div className="text-xl lg:text-2xl text-zinc-400 mt-1 truncate">
                       {chords.lines[chordActiveIdx + 1].chords.map((c, ci) => (
                         <span key={ci}>{transposeChordText(c.text, semitones + keyAdj)}{"  "}</span>
                       ))}
@@ -2168,9 +2175,14 @@ export default function KaraokePage() {
                   ) : null}
                 </div>
               ) : null}
-              {/* 가사 (아래) */}
+              {/* 가사 (아래) — 이전/현재/다음 3줄 (일반 스트립과 동일 구조) */}
               {lyrics && lyricsShow && lyricActiveIdx >= 0 ? (
-                <div className="text-center">
+                <div className="text-center space-y-1">
+                  {lyricActiveIdx > 0 ? (
+                    <div className="text-lg lg:text-xl text-zinc-500 truncate">
+                      {lyricLines[lyricActiveIdx - 1].text}
+                    </div>
+                  ) : null}
                   <div className="text-2xl lg:text-3xl font-bold text-white break-keep drop-shadow-lg">
                     {lyricLines[lyricActiveIdx].text}
                   </div>
