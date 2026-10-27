@@ -766,13 +766,12 @@ export default function KaraokePage() {
     });
   };
 
-  // 편집창에서 기록된 스탬프 클릭 → 해당 시각으로 시크
-  const handleEditClick = () => {
-    const el = document.getElementById("lyrics-edit-area") as HTMLTextAreaElement | null;
+  // 편집창에서 기록된 스탬프 클릭 → 해당 시각으로 시크 (가사/코드 편집창 공용)
+  const handleStampClickIn = (elId: string, text: string) => {
+    const el = document.getElementById(elId) as HTMLTextAreaElement | null;
     if (!el) return;
     const pos = el.selectionStart;
     if (el.selectionStart !== el.selectionEnd) return; // 드래그 선택은 무시
-    const text = lyricsEditText;
     const lineStart = text.lastIndexOf("\n", pos - 1) + 1;
     let lineEnd = text.indexOf("\n", pos);
     if (lineEnd < 0) lineEnd = text.length;
@@ -789,6 +788,9 @@ export default function KaraokePage() {
       }
     }
   };
+
+  const handleEditClick = () => handleStampClickIn("lyrics-edit-area", lyricsEditText);
+  const handleChordsEditClick = () => handleStampClickIn("chords-edit-area", chordsText);
 
   // 가사 생성 — 빈 편집창 바로 시작 (수동 싱크 워크플로)
   const lyricsCreateNew = () => {
@@ -2687,7 +2689,7 @@ export default function KaraokePage() {
       {chordsOpen ? (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-4" onClick={() => setChordsOpen(false)}>
           <div
-            className="w-full max-w-lg rounded-2xl border border-zinc-800 bg-zinc-950 p-5 space-y-4 max-h-[85vh] overflow-auto"
+            className="w-full max-w-2xl rounded-2xl border border-zinc-800 bg-zinc-950 p-5 space-y-4 max-h-[85vh] overflow-auto"
             onClick={(e) => e.stopPropagation()}
           >
             <div className="flex items-center justify-between">
@@ -2700,10 +2702,11 @@ export default function KaraokePage() {
             </div>
             <textarea
               id="chords-edit-area"
-              className="w-full h-64 bg-zinc-900 border border-zinc-700 rounded-lg px-3 py-2 text-sm font-mono"
+              className="w-full h-80 bg-zinc-900 border border-zinc-700 rounded-lg px-3 py-2 text-sm font-mono"
               placeholder={"[00:07.82] Am[00:08.44] Bm[00:09.82] C7\n[00:14.82] F[00:15.44] G[00:16.82] Am"}
               value={chordsText}
               onChange={(e) => setChordsText(e.target.value)}
+              onClick={handleChordsEditClick}
             />
             {/* Transport: 재생 컨트롤 + 커서 위치 코드 스탬프 */}
             <div className="flex items-center gap-2 rounded-lg border border-zinc-800 bg-zinc-900/60 px-2 py-1.5">
