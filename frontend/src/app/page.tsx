@@ -1958,7 +1958,7 @@ export default function KaraokePage() {
             </div>
           </div>
         ) : (
-          <div className="h-full flex items-center justify-center text-zinc-500 text-sm">Paste a YouTube link above.</div>
+          <div className="h-full flex items-center justify-center text-zinc-600 text-sm">Library에서 곡을 선택하세요</div>
         )}
 
         {toastMsg ? (
