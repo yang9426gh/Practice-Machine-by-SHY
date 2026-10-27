@@ -440,26 +440,6 @@ export default function KaraokePage() {
     } catch {}
   };
 
-  // 빈 스탬프 — 재생 중 현재 위치의 타임스탬프만 기록 (가사는 나중에 편집기에서 채움)
-  const lyricsStampEmpty = async () => {
-    try {
-      const r = await fetch(`${BACKEND}/lyrics/${videoId}/stamp`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ position_sec: currentPosition() }),
-      });
-      const j = await r.json();
-      if (r.ok && j.ok) {
-        setLyrics({ lines: j.lines, offsetMs: j.offset_ms || 0, lrc: j.lrc, source: lyrics?.source || "빈 스탬프" });
-        toast(`스탬프 찍음 ${j.stamp} (빈 스탬프 ${j.empty_stamps}개)`);
-      } else {
-        toast(`스탬프 실패: ${j.detail || "?"}`);
-      }
-    } catch (e: any) {
-      toast(`스탬프 실패: ${String(e?.message || e)}`);
-    }
-  };
-
   // 실시간 재생 위치 (uiPos 틱과 무관하게 즉시값 — 버튼 표시/스탬프용)
   const currentPositionLive = () => {
     const ctx = audioCtxRef.current;
@@ -505,6 +485,13 @@ export default function KaraokePage() {
       el.focus();
       el.setSelectionRange(caret, caret);
     });
+  };
+
+  // 가사 생성 — 빈 편집창 바로 시작 (수동 싱크 워크플로)
+  const lyricsCreateNew = () => {
+    setLyricsEditText("");
+    setLyricsOpen(true);
+    setLyricsMode("edit");
   };
 
   const toast = (msg: string, ms: number = 2200) => {
@@ -1747,15 +1734,6 @@ export default function KaraokePage() {
               >
                 가사 {lyrics ? (lyricsShow ? "표시중" : "숨김") : "가져오기"}
               </button>
-              {status === "completed" ? (
-                <button
-                  onClick={lyricsStampEmpty}
-                  title="재생 중 현재 위치에 빈 타임스탬프 찍기 — 나중에 편집기에서 가사 채우기"
-                  className="px-3 py-2 rounded-lg border border-zinc-700 text-sm hover:bg-zinc-900"
-                >
-                  빈 스탬프
-                </button>
-              ) : null}
               {lyrics ? (
                 <>
                   <button
@@ -2117,6 +2095,13 @@ export default function KaraokePage() {
                 >
                   <div className="text-base font-semibold text-zinc-100">2. 가사 직접 업로드 (LRC)</div>
                   <div className="text-xs text-zinc-500 mt-1">LRCLIB 등에서 복사한 LRC 텍스트를 붙여넣기</div>
+                </button>
+                <button
+                  onClick={lyricsCreateNew}
+                  className="rounded-xl border border-zinc-700 bg-zinc-900/60 px-4 py-5 text-left hover:bg-zinc-900"
+                >
+                  <div className="text-base font-semibold text-zinc-100">3. 가사 생성</div>
+                  <div className="text-xs text-zinc-500 mt-1">빈 상태에서 직접 만들기 — 트랜스포트로 재생하며 스탬프 찍기</div>
                 </button>
               </div>
             ) : null}
