@@ -4,6 +4,7 @@ set -euo pipefail
 cd "$(dirname "${BASH_SOURCE[0]}")"
 ROOT="$(pwd)"
 PORT="${HOLY_PORT:-8011}"
+HOST="${HOLY_HOST:-0.0.0.0}"   # 0.0.0.0 = 같은 네트워크 다른 기기 접속 허용 (localhost로 바꾸면 이 기기 전용)
 
 # 프론트 빌드물 확인
 if [ ! -f "$ROOT/frontend/out/index.html" ]; then
@@ -28,10 +29,10 @@ source venv/bin/activate
 
 # 백그라운드 실행 (기본) or 포그라운드 (HOLY_FOREGROUND=1)
 if [ "${HOLY_FOREGROUND:-}" = "1" ]; then
-  exec python -m uvicorn main:app --host 127.0.0.1 --port "$PORT"
+  exec python -m uvicorn main:app --host "$HOST" --port "$PORT"
 else
   LOG="$ROOT/backend/run.log"
-  nohup python -m uvicorn main:app --host 127.0.0.1 --port "$PORT" >"$LOG" 2>&1 &
+  nohup python -m uvicorn main:app --host "$HOST" --port "$PORT" >"$LOG" 2>&1 &
   echo $! > "$ROOT/backend/run.pid"
   # 기동 확인
   for i in $(seq 1 20); do

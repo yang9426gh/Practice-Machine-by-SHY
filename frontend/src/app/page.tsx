@@ -4,7 +4,7 @@ import React, { useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { Play, Pause } from "lucide-react";
 
-const BACKEND = process.env.NEXT_PUBLIC_BACKEND_URL || "http://localhost:8011";
+const BACKEND = process.env.NEXT_PUBLIC_BACKEND_URL || (typeof window !== "undefined" ? window.location.origin : "http://localhost:8011");
 
 type Status = "idle" | "processing" | "completed";
 
@@ -1251,7 +1251,7 @@ export default function KaraokePage() {
         <div className="flex gap-2 items-center">
           <input
             className="flex-1 bg-zinc-900 border border-zinc-700 rounded-lg px-3 py-2 text-sm"
-            placeholder="Paste YouTube URL (lyric video)…"
+            placeholder="Paste YouTube URL…"
             value={url}
             onChange={(e) => setUrl(e.target.value)}
             onKeyDown={(e) => {

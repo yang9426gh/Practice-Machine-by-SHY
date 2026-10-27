@@ -3,7 +3,7 @@
 import React, { useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 
-const BACKEND = process.env.NEXT_PUBLIC_BACKEND_URL || "http://localhost:8011";
+const BACKEND = process.env.NEXT_PUBLIC_BACKEND_URL || (typeof window !== "undefined" ? window.location.origin : "http://localhost:8011");
 
 type Preset = {
   id: string;

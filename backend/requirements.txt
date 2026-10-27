@@ -5,7 +5,6 @@ starlette>=0.38
 
 # YouTube / metadata
 yt-dlp>=2025.1.1
-youtube-transcript-api>=1.0
 ytmusicapi>=1.4
 
 # Audio processing
@@ -15,9 +14,3 @@ scipy>=1.11
 soundfile>=0.12
 aiohttp>=3.9
 imageio-ffmpeg>=0.5      # ffmpeg 바이너리 번들 — Homebrew 불필요
-
-# Lyrics transcription (openai-whisper 대체: 4배 빠름, RAM 절반)
-faster-whisper>=1.0
-
-# Text matching
-rapidfuzz>=3.6

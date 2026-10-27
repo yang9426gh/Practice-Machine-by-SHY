@@ -23,7 +23,6 @@ def init_db(data_dir: str) -> None:
               cover_url TEXT,
               vocals_path TEXT,
               no_vocals_path TEXT,
-              lyrics_json_path TEXT,
               created_at INTEGER DEFAULT (strftime('%s','now')),
               updated_at INTEGER DEFAULT (strftime('%s','now'))
             );
@@ -86,14 +85,13 @@ def upsert_track(
     title: Optional[str] = None,
     artist: Optional[str] = None,
     cover_url: Optional[str] = None,
-    lyrics_json_path: Optional[str] = None,
 ) -> None:
     con = sqlite3.connect(db_path(data_dir))
     try:
         con.execute(
             """
-            INSERT INTO tracks(video_id, source_url, task_id, title, artist, cover_url, vocals_path, no_vocals_path, lyrics_json_path)
-            VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?)
+            INSERT INTO tracks(video_id, source_url, task_id, title, artist, cover_url, vocals_path, no_vocals_path)
+            VALUES(?, ?, ?, ?, ?, ?, ?, ?)
             ON CONFLICT(video_id) DO UPDATE SET
               source_url=excluded.source_url,
               task_id=excluded.task_id,
@@ -102,10 +100,9 @@ def upsert_track(
               cover_url=COALESCE(excluded.cover_url, tracks.cover_url),
               vocals_path=excluded.vocals_path,
               no_vocals_path=excluded.no_vocals_path,
-              lyrics_json_path=COALESCE(excluded.lyrics_json_path, tracks.lyrics_json_path),
               updated_at=strftime('%s','now');
             """
-        , (video_id, source_url, task_id, title, artist, cover_url, vocals_path, no_vocals_path, lyrics_json_path))
+        , (video_id, source_url, task_id, title, artist, cover_url, vocals_path, no_vocals_path))
         con.commit()
     finally:
         con.close()

@@ -8,23 +8,16 @@ from starlette.concurrency import run_in_threadpool
 from pydantic import BaseModel
 import os
 import shutil
-import uuid
 import hashlib
 import threading
 import traceback
 from processor import download_youtube_audio, download_youtube_video, separate_stems
-from youtube_transcript_api import YouTubeTranscriptApi
 from ytmusicapi import YTMusic
 
 from db import init_db, upsert_track, get_track, list_tracks, upsert_preset, list_presets, delete_preset, delete_track
-from lyrics_sync import align_lyrics_to_segments, align_lyrics_to_words, align_lyrics_to_words_dp, align_lyrics_to_words_anchored
-from rapidfuzz import fuzz
 
-YT = YouTubeTranscriptApi()
 YTM = YTMusic()
 
-# faster-whisper (openai-whisper 대체 — 4배 빠름, RAM 절반)
-import whisper_fw
 from ffmpeg_locate import ffmpeg_bin
 
 
@@ -40,220 +33,8 @@ def wav_duration_seconds(path: str) -> float:
         return 0.0
 
 
-def is_bad_lyric_sync(
-    lines: list[dict],
-    *,
-    max_gap_s: float = 25.0,
-    cluster_ratio: float = 0.18,
-    min_step_s: float = 0.25,
-) -> bool:
-    """Heuristics to detect degenerate timestamp outputs.
-
-    Symptoms we want to catch:
-      - Huge gaps (lyrics freeze for a long time)
-      - Tight clusters (lyrics fly by insanely fast)
-      - Duplicate/zero deltas (multiple lines mapped to the same time)
-
-    Note: we run this BEFORE monotonic-normalization.
-    """
-    if not lines or len(lines) < 8:
-        return True
-
-    times: list[float] = []
-    for ln in lines:
-        try:
-            times.append(float(ln.get("time", 0) or 0))
-        except Exception:
-            times.append(0.0)
-
-    # Must be monotonic-ish
-    for i in range(1, len(times)):
-        if times[i] < times[i - 1]:
-            return True
-
-    deltas = [times[i] - times[i - 1] for i in range(1, len(times))]
-    if not deltas:
-        return True
-
-    if max(deltas) >= max_gap_s:
-        return True
-
-    # duplicates / too-small steps
-    zeroish = sum(1 for d in deltas if d <= 0.001)
-    if zeroish > 0:
-        return True
-
-    small = sum(1 for d in deltas if d <= min_step_s)
-    if small / max(1, len(deltas)) >= cluster_ratio:
-        return True
-
-    return False
-
-
-def linear_fallback_sync(lyric_lines: list[str], duration_s: float) -> list[dict]:
-    """Fallback: spread lyric lines evenly across the track duration."""
-    n = len(lyric_lines)
-    if n <= 0:
-        return []
-
-    dur = float(duration_s or 0)
-    if dur <= 0:
-        # sane default
-        dur = max(60.0, n * 2.5)
-
-    # leave a small tail so the last line stays visible
-    usable = max(5.0, dur - 2.0)
-    step = usable / max(1, n)
-    step = max(0.35, step)  # prevent too-fast scrolling
-
-    out = []
-    t = 0.0
-    for ln in lyric_lines:
-        out.append({"time": t, "text": ln})
-        t += step
-    return out
-
-
-def _norm_text(s: str) -> str:
-    s = (s or "").lower().strip()
-    # cheap normalization for matching
-    for ch in ["\"", "'", "’", ",", ".", "!", "?", "(", ")", "[", "]"]:
-        s = s.replace(ch, "")
-    s = " ".join(s.split())
-    return s
-
-
-def captions_phrases(video_id: str) -> list[dict]:
-    """Fetch YouTube transcript captions (with timestamps) and merge into short phrases."""
-    # try English first, then any available
-    try_langs = ["en", "en-US", "en-GB"]
-    transcript = None
-    last_err = None
-    # Newer youtube-transcript-api uses .fetch() and .list()
-    for lang in try_langs:
-        try:
-            transcript = YT.fetch(video_id, languages=[lang])
-            break
-        except Exception as e:
-            last_err = e
-            transcript = None
-
-    if transcript is None:
-        # fallback: try without language (may pick auto)
-        try:
-            transcript = YT.fetch(video_id)
-        except Exception as e:
-            raise Exception(f"No YouTube transcript available: {last_err or e}")
-
-    # Merge into phrases ~ up to 70 chars or ~4s span
-    phrases: list[dict] = []
-    cur = {"start": None, "text": ""}
-    cur_end = None
-
-    for item in transcript:
-        t = float(item.get("start") or 0)
-        d = float(item.get("duration") or 0)
-        txt = _norm_text(item.get("text") or "")
-        if not txt:
-            continue
-
-        if cur["start"] is None:
-            cur["start"] = t
-            cur["text"] = txt
-            cur_end = t + d
-            continue
-
-        # decide whether to append or flush
-        span = (t + d) - float(cur["start"])
-        if len(cur["text"]) < 70 and span < 4.5:
-            cur["text"] = (cur["text"] + " " + txt).strip()
-            cur_end = t + d
-        else:
-            phrases.append({"start": float(cur["start"]), "text": cur["text"]})
-            cur = {"start": t, "text": txt}
-            cur_end = t + d
-
-    if cur["start"] is not None and cur["text"]:
-        phrases.append({"start": float(cur["start"]), "text": cur["text"]})
-
-    return phrases
-
-
-def align_lyrics_to_captions_lines(lyric_lines: list[str], phrases: list[dict]) -> list[dict]:
-    """Monotonic greedy match: each lyric line picks best caption phrase ahead."""
-    out: list[dict] = []
-    if not lyric_lines:
-        return out
-    if not phrases:
-        raise Exception("No caption phrases")
-
-    p_texts = [p.get("text") or "" for p in phrases]
-
-    j = 0
-    for ln in lyric_lines:
-        q = _norm_text(ln)
-        if not q:
-            continue
-
-        best_i = None
-        best_score = -1
-
-        # search forward window
-        win = 120
-        for i in range(j, min(len(phrases), j + win)):
-            score = fuzz.token_set_ratio(q, p_texts[i])
-            if score > best_score:
-                best_score = score
-                best_i = i
-                if score >= 95:
-                    break
-
-        if best_i is None:
-            best_i = j
-            best_score = 0
-
-        # If score is very low, we still advance slowly to keep monotonicity
-        # but mark score so we can inspect.
-        start_t = float(phrases[best_i].get("start") or 0)
-        out.append({"time": start_t, "text": ln, "score": int(best_score)})
-
-        # advance pointer; if we matched confidently, jump to that index+1, else inch forward
-        if best_score >= 60:
-            j = max(j, best_i + 1)
-        else:
-            j = min(len(phrases) - 1, j + 1)
-
-    return out
-
-
-def whisperx_words(audio_path: str, model_name: str = "medium", lang: str | None = None) -> list[dict]:
-    """Word timestamps via faster-whisper (이전 whisperx 대체).
-
-    노래에서 반복 필러("oh", "uh")로 붕괴하는 경우를 대비해 degeneracy 검사 후 폴백.
-    """
-    try:
-        result = whisper_fw.transcribe_with_words(audio_path, model_name=model_name, language=lang)
-    except Exception:
-        return []
-
-    words = whisper_fw.words_from_result(result)
-
-    # Degeneracy check: if too repetitive, don't trust the words
-    if len(words) >= 30:
-        from collections import Counter
-        toks = [(w.get("word") or "").strip().lower() for w in words]
-        toks = [t for t in toks if t and any(ch.isalpha() for ch in t)]
-        if toks:
-            c = Counter(toks)
-            top_tok, top_cnt = c.most_common(1)[0]
-            uniq = len(c)
-            top_ratio = top_cnt / max(1, len(toks))
-            if top_ratio > 0.20 or uniq < 25:
-                return []
-
-    return words
-
 app = FastAPI()
+
 
 # -----------------------------
 # Queue / background worker
@@ -532,70 +313,9 @@ def run_pipeline(url: str, output_dir: str, task_id: str):
         )
         clear_proc(task_id)
 
-        # attempt lyric sync (A): YT Music lyrics text + Whisper segments
-        set_task(task_id, stage="transcribing", progress=0)
-
         stems = find_stems(output_dir)
         vocals_path = stems.get("vocals") or ""
         no_vocals_path = stems.get("no_vocals") or stems.get("accompaniment") or ""
-
-        # fetch ytmusic lyrics (text)
-        lyric_lines = []
-        try:
-            wp = YTM.get_watch_playlist(vid)
-            lyrics_id = wp.get("lyrics")
-            if lyrics_id:
-                ly = YTM.get_lyrics(lyrics_id)
-                text = (ly.get("lyrics") or "").strip()
-                lyric_lines = [ln.strip() for ln in text.splitlines() if ln.strip()]
-        except Exception:
-            lyric_lines = []
-
-        synced_path = None
-        if lyric_lines and os.path.exists(vocals_path):
-            model_name = os.environ.get("HOLY_WHISPER_MODEL", "base")
-            set_task(task_id, stage="transcribing", progress=25)
-            result = whisper_fw.transcribe_with_words(vocals_path, model_name=model_name)
-            segments = [{"start": s["start"], "end": s["end"], "text": s["text"]} for s in (result.get("segments") or [])]
-
-            # gather word timestamps if available
-            words = whisper_fw.words_from_result(result)
-
-            set_task(task_id, stage="aligning_lyrics", progress=0)
-            if words:
-                # Try anchored alignment first (handles repeated choruses better)
-                synced = align_lyrics_to_words_anchored(lyric_lines, words)
-                if is_bad_lyric_sync(synced):
-                    synced = align_lyrics_to_words_dp(lyric_lines, words)
-            else:
-                synced = align_lyrics_to_segments(lyric_lines, segments)
-
-            # If the sync looks degenerate, do NOT fail the whole job.
-            # We'll just skip writing synced lyrics and proceed with stems/video.
-            if is_bad_lyric_sync(synced):
-                times = [float(x.get('time', 0) or 0) for x in synced]
-                deltas = [times[i]-times[i-1] for i in range(1, len(times))]
-                max_gap = max(deltas) if deltas else None
-                min_delta = min(deltas) if deltas else None
-                print(f"[warn] Bad lyric sync detected; skipping lyrics (max_gap={max_gap}, min_delta={min_delta}, words={len(words)}, model={model_name}).")
-                synced = []
-
-            # Normalize: enforce monotonically increasing times.
-            prev_t = -1.0
-            for ln in synced:
-                try:
-                    t = float(ln.get("time", 0) or 0)
-                except Exception:
-                    t = 0.0
-                if t <= prev_t:
-                    t = prev_t + 0.05
-                ln["time"] = t
-                prev_t = t
-
-            synced_path = os.path.join(output_dir, "lyrics.synced.json")
-            import json
-            with open(synced_path, "w", encoding="utf-8") as f:
-                json.dump({"video_id": vid, "source": "ytmusic+whisper", "lines": synced}, f, ensure_ascii=False)
 
         # write to db for fast re-use
         if vid and os.path.exists(vocals_path) and os.path.exists(no_vocals_path):
@@ -625,7 +345,6 @@ def run_pipeline(url: str, output_dir: str, task_id: str):
                 cover_url=cover_url,
                 vocals_path=vocals_path,
                 no_vocals_path=no_vocals_path,
-                lyrics_json_path=synced_path,
             )
 
         set_task(task_id, status="completed", stage="completed", progress=100)
@@ -677,7 +396,7 @@ async def get_status(task_id: str):
                 "video": f"/audio/{os.path.basename(output_dir)}/video.mp4" if os.path.exists(video_file) else None,
             }
 
-        # If we have audio but lyric-sync is still running, keep status=processing.
+        # If we have audio but post-processing is still running, keep status=processing.
         if stage and stage != "completed":
             return {
                 "status": "processing",
@@ -806,7 +525,6 @@ async def library(limit: int = 50):
             "title": it.get("title"),
             "artist": it.get("artist"),
             "cover_url": it.get("cover_url"),
-            "has_synced_lyrics": bool(it.get("lyrics_json_path")) and os.path.exists(it.get("lyrics_json_path")),
             "updated_at": it.get("updated_at"),
         })
     return {"items": out}
@@ -1312,280 +1030,6 @@ async def transpose(task_id: str, semitones: int = 0):
     }
 
 
-@app.post("/resync/{video_id}")
-async def resync_lyrics(video_id: str, background_tasks: BackgroundTasks, model: str = "medium"):
-    """Re-run whisper+alignment for an already-cached track."""
-    cached = get_track(DATA_DIR, video_id)
-    if not cached:
-        raise HTTPException(status_code=404, detail="Track not found in cache")
-
-    task_id = cached.get("task_id") or task_id_for_url(video_id)
-    output_dir = os.path.join(DATA_DIR, task_id)
-    vocals_path = cached.get("vocals_path")
-
-    if not vocals_path or not os.path.exists(vocals_path):
-        raise HTTPException(status_code=400, detail="Missing vocals file for this track")
-
-    set_task(task_id, stage="transcribing", progress=0)
-    background_tasks.add_task(_resync_task, video_id, task_id, output_dir, vocals_path, model, cached)
-    return {"task_id": task_id, "status": "processing"}
-
-
-def _resync_task(video_id: str, task_id: str, output_dir: str, vocals_path: str, model_name: str, cached: dict):
-    try:
-        set_task(task_id, stage="transcribing", progress=5)
-
-        # ytmusic lyrics
-        lyric_lines = []
-        wp = YTM.get_watch_playlist(video_id)
-        lyrics_id = wp.get("lyrics")
-        if lyrics_id:
-            ly = YTM.get_lyrics(lyrics_id)
-            text = (ly.get("lyrics") or "").strip()
-            lyric_lines = [ln.strip() for ln in text.splitlines() if ln.strip()]
-
-        if not lyric_lines:
-            raise Exception("No YT Music lyrics text")
-
-        # Captions-based sync (preferred for singing when whisper word-timestamps are unreliable)
-        if model_name == "captions":
-            set_task(task_id, stage="fetching_captions", progress=20)
-            phrases = captions_phrases(video_id)
-            set_task(task_id, stage="aligning_lyrics", progress=70)
-            synced = align_lyrics_to_captions_lines(lyric_lines, phrases)
-
-            # sanity: require timestamps to be monotonic and not too gappy
-            if is_bad_lyric_sync(synced):
-                times = [float(x.get('time', 0) or 0) for x in synced]
-                deltas = [times[i] - times[i-1] for i in range(1, len(times))]
-                max_gap = max(deltas) if deltas else None
-                min_delta = min(deltas) if deltas else None
-                raise Exception(
-                    f"Bad captions sync (max_gap={max_gap}, min_delta={min_delta}, phrases={len(phrases)})."
-                )
-
-            # Normalize monotonic
-            prev_t = -1.0
-            for ln in synced:
-                t = float(ln.get('time', 0) or 0)
-                if t <= prev_t:
-                    t = prev_t + 0.05
-                ln['time'] = t
-                prev_t = t
-
-            synced_path = os.path.join(output_dir, "lyrics.synced.json")
-            import json
-            with open(synced_path, "w", encoding="utf-8") as f:
-                json.dump({"video_id": video_id, "source": "ytcaptions", "lines": synced}, f, ensure_ascii=False)
-
-            upsert_track(
-                DATA_DIR,
-                video_id=video_id,
-                source_url=cached.get("source_url") or f"https://www.youtube.com/watch?v={video_id}",
-                task_id=task_id,
-                title=cached.get("title"),
-                artist=cached.get("artist"),
-                cover_url=cached.get("cover_url"),
-                vocals_path=cached.get("vocals_path"),
-                no_vocals_path=cached.get("no_vocals_path"),
-                lyrics_json_path=synced_path,
-            )
-
-            set_task(task_id, stage="completed", progress=100)
-            return
-
-        # Prefer ORIGINAL mix for alignment (singing + timing cues are often clearer than demucs vocals)
-        set_task(task_id, stage="transcribing", progress=15)
-        original_path = os.path.join(output_dir, "original.wav")
-        src_audio = original_path if os.path.exists(original_path) else vocals_path
-
-        # Preprocess for Whisper/WhisperX (mono 16k + mild filtering)
-        whisper_in = os.path.join(output_dir, "whisper_in.wav")
-        try:
-            import subprocess
-            subprocess.run(
-                [
-                    ffmpeg_bin(),
-                    "-y",
-                    "-i",
-                    src_audio,
-                    "-af",
-                    "highpass=f=80,lowpass=f=9000,dynaudnorm",
-                    "-ar",
-                    "16000",
-                    "-ac",
-                    "1",
-                    whisper_in,
-                ],
-                check=True,
-                stdout=subprocess.DEVNULL,
-                stderr=subprocess.DEVNULL,
-            )
-        except Exception:
-            whisper_in = src_audio
-
-        # initial prompt: give Whisper a hint of the actual lyrics text
-        prompt = "\n".join(lyric_lines[:30])
-        if len(prompt) > 1200:
-            prompt = prompt[:1200]
-
-        # faster-whisper: word timestamps on original mix (initial_prompt로 실제 가사 힌트)
-        set_task(task_id, stage="transcribing", progress=25)
-        result = whisper_fw.transcribe_with_words(
-            whisper_in,
-            model_name=model_name,
-            initial_prompt=prompt,
-        )
-        segments = [{"start": s["start"], "end": s["end"], "text": s["text"]} for s in (result.get("segments") or [])]
-        words = whisper_fw.words_from_result(result)
-
-        # Degenerate words면 폴백: words 비움 → segment 기반 정렬 사용
-        if words and not whisper_fw.words_ok(words):
-            words = []
-
-        # Debug artifacts (so we stop guessing)
-        try:
-            import json
-            with open(os.path.join(output_dir, "debug.words.json"), "w", encoding="utf-8") as f:
-                json.dump({"video_id": video_id, "model": model_name, "count": len(words), "words": words[:5000]}, f, ensure_ascii=False)
-            with open(os.path.join(output_dir, "debug.segments.json"), "w", encoding="utf-8") as f:
-                json.dump({"video_id": video_id, "model": model_name, "segments": segments[:2000]}, f, ensure_ascii=False)
-        except Exception:
-            pass
-
-        set_task(task_id, stage="transcribing", progress=70)
-
-        set_task(task_id, stage="aligning_lyrics", progress=85)
-        if words:
-            synced = align_lyrics_to_words_anchored(lyric_lines, words)
-            if is_bad_lyric_sync(synced):
-                synced = align_lyrics_to_words_dp(lyric_lines, words)
-        else:
-            # segments from original mix tend to be more stable than demucs vocals
-            synced = align_lyrics_to_segments(lyric_lines, segments, search_window=40)
-
-        set_task(task_id, stage="aligning_lyrics", progress=95)
-
-        # If the sync looks degenerate, FAIL (do not silently fall back)
-        if is_bad_lyric_sync(synced):
-            times = [float(x.get('time', 0) or 0) for x in synced]
-            deltas = [times[i] - times[i-1] for i in range(1, len(times))]
-            max_gap = max(deltas) if deltas else None
-            min_delta = min(deltas) if deltas else None
-            raise Exception(
-                f"Bad lyric sync detected (max_gap={max_gap}, min_delta={min_delta}, words={len(words)}, model={model_name})."
-            )
-
-        # Normalize: enforce monotonically increasing times (avoid UI sticking)
-        prev_t = -1.0
-        for ln in synced:
-            try:
-                t = float(ln.get("time", 0) or 0)
-            except Exception:
-                t = 0.0
-            if t <= prev_t:
-                t = prev_t + 0.05
-            ln["time"] = t
-            prev_t = t
-
-        synced_path = os.path.join(output_dir, "lyrics.synced.json")
-        import json
-        with open(synced_path, "w", encoding="utf-8") as f:
-            json.dump({"video_id": video_id, "source": f"ytmusic+whisper-{model_name}", "lines": synced}, f, ensure_ascii=False)
-
-        # update DB pointer
-        upsert_track(
-            DATA_DIR,
-            video_id=video_id,
-            source_url=cached.get("source_url") or f"https://www.youtube.com/watch?v={video_id}",
-            task_id=task_id,
-            title=cached.get("title"),
-            artist=cached.get("artist"),
-            cover_url=cached.get("cover_url"),
-            vocals_path=cached.get("vocals_path"),
-            no_vocals_path=cached.get("no_vocals_path"),
-            lyrics_json_path=synced_path,
-        )
-
-        set_task(task_id, stage="completed", progress=100)
-    except Exception as e:
-        set_task(task_id, stage="error", error=str(e) + "\n" + traceback.format_exc())
-
-
-@app.get("/lyrics/{video_id}")
-async def lyrics(video_id: str, source: str = "ytmusic"):
-    """Fetch lyrics.
-
-    source=ytmusic  -> YouTube Music lyrics (usually NOT time-synced)
-    source=yt       -> YouTube transcript captions (often auto-translated / not true lyrics)
-
-    Returns: { video_id, source, hasTimestamps, lines: [{time?, text}] }
-    """
-
-    if source == "ytmusic":
-        # if we previously generated synced lyrics via whisper, return that.
-        cached = get_track(DATA_DIR, video_id)
-        if cached and cached.get("lyrics_json_path") and os.path.exists(cached.get("lyrics_json_path")):
-            import json
-            with open(cached.get("lyrics_json_path"), "r", encoding="utf-8") as f:
-                data = json.load(f)
-            return {
-                "video_id": video_id,
-                "source": data.get("source", "ytmusic+whisper"),
-                "hasTimestamps": True,
-                "lines": data.get("lines", []),
-            }
-
-        try:
-            wp = YTM.get_watch_playlist(video_id)
-            lyrics_id = wp.get("lyrics")
-            if not lyrics_id:
-                raise HTTPException(status_code=404, detail="No YT Music lyrics id for this track")
-            ly = YTM.get_lyrics(lyrics_id)
-            text = (ly.get("lyrics") or "").strip()
-            if not text:
-                raise HTTPException(status_code=404, detail="No lyrics text returned")
-
-            # No timestamps exposed here in most cases
-            lines = [{"text": ln} for ln in text.splitlines() if ln.strip()]
-            return {
-                "video_id": video_id,
-                "source": "ytmusic",
-                "hasTimestamps": bool(ly.get("hasTimestamps")),
-                "lines": lines,
-            }
-        except HTTPException:
-            raise
-        except Exception as e:
-            raise HTTPException(status_code=404, detail=f"No YT Music lyrics available: {e}")
-
-    if source == "yt":
-        try:
-            transcript_list = YT.list(video_id)
-
-            transcript = None
-            for lang in ["ko", "en"]:
-                try:
-                    transcript = transcript_list.find_transcript([lang])
-                    break
-                except Exception:
-                    pass
-
-            if transcript is None:
-                transcript = transcript_list.find_transcript([t.language_code for t in transcript_list])
-
-            items = transcript.fetch()
-            lines = []
-            for snip in getattr(items, "snippets", []) or []:
-                t = float(getattr(snip, "start", 0))
-                txt = (getattr(snip, "text", "") or "").replace("\n", " ").strip()
-                if txt:
-                    lines.append({"time": t, "text": txt})
-            return {"video_id": video_id, "source": "yt", "hasTimestamps": True, "lines": lines}
-        except Exception as e:
-            raise HTTPException(status_code=404, detail=f"No transcript available: {e}")
-
-    raise HTTPException(status_code=400, detail="source must be ytmusic or yt")
 
 
 # -----------------------------
@@ -1603,7 +1047,13 @@ if os.path.isdir(FRONTEND_DIST):
 
     @app.get("/{full_path:path}", include_in_schema=False)
     async def serve_spa(full_path: str):
+        # 삭제된 API 경로(/lyrics, /resync 등)는 SPA 폴백 대신 404 — 프론트가 HTML을 파싱하는 일 방지
+        removed_api = {"resync", "lyrics", "jobs"}
+        first_seg = full_path.split("/")[0]
+        if first_seg in removed_api:
+            raise HTTPException(status_code=404, detail="Not found")
         # /library, /settings 등 클라이언트 라우트 → 해당 디렉터리 index.html
+        # (단, trailing slash 없는 /library는 API JSON 라우트가 먼저 매칭됨)
         candidate = os.path.normpath(os.path.join(FRONTEND_DIST, full_path))
         if full_path and candidate.startswith(os.path.abspath(FRONTEND_DIST)):
             if os.path.isfile(candidate):
