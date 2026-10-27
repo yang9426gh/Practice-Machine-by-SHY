@@ -116,8 +116,13 @@ def build_ass(
     chord_fs = max(24, round(height * 0.052))
     lyric_fs = max(16, round(height * 0.040))
     outline = max(2, round(height * 0.0035))
-    mv_chord = round(height * 0.062)   # 상단 ~6%
-    mv_lyric = round(height * 0.185)   # 코드 아래, 상단 1/3 안
+    # 다음 라인 미리보기 (앱 fullscreen 모드처럼 현재+다음 동시 표시)
+    chord_next_fs = max(14, round(chord_fs * 0.55))
+    lyric_next_fs = max(12, round(lyric_fs * 0.70))
+    mv_chord = round(height * 0.05)  # 상단 ~5%
+    mv_chord_next = round(height * 0.115)  # 현재 코드 아래 (fs 간격)
+    mv_lyric = round(height * (0.175 if chord_lines else 0.10))  # 코드 블록 아래, 상단 1/3 안
+    mv_lyric_next = round(height * (0.245 if chord_lines else 0.165))  # 현재 가사 아래
 
     header = f"""[Script Info]
 ScriptType: v4.00+
@@ -130,6 +135,8 @@ ScaledBorderAndShadow: yes
 Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding
 Style: Chord,{font_name},{chord_fs},&H00FFFFFF,&H006E6E6E,&H00000000,&H00000000,1,0,0,0,100,100,0,0,1,{outline},0,8,60,60,{mv_chord},1
 Style: Lyric,{font_name},{lyric_fs},&H00F2F2F2,&H00000000,&H00000000,&H00000000,0,0,0,0,100,100,0,0,1,{max(2, outline - 1)},0,8,60,60,{mv_lyric},1
+Style: ChordNext,{font_name},{chord_next_fs},&H00969696,&H006E6E6E,&H00000000,&H00000000,0,0,0,0,100,100,0,0,1,{max(2, outline - 1)},0,8,60,60,{mv_chord_next},1
+Style: LyricNext,{font_name},{lyric_next_fs},&H00AAAAAA,&H00000000,&H00000000,&H00000000,0,0,0,0,100,100,0,0,1,{max(2, outline - 1)},0,8,60,60,{mv_lyric_next},1
 
 [Events]
 Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
@@ -138,14 +145,14 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
     events: List[str] = []
 
     # --- 코드 줄: \k 카라오케 (다음 코드까지의 시간만큼 스윕) ---
-    for start, end, ln in chord_tl:
+    for i, (start, end, ln) in enumerate(chord_tl):
         evs = ln.get("chords") or []
         if not evs:
             continue
         seg: List[str] = []
-        for i, ev in enumerate(evs):
-            if i + 1 < len(evs):
-                dur_cs = int(round((float(evs[i + 1]["time"]) - float(ev["time"])) * 100))
+        for j, ev in enumerate(evs):
+            if j + 1 < len(evs):
+                dur_cs = int(round((float(evs[j + 1]["time"]) - float(ev["time"])) * 100))
             else:
                 dur_cs = int(round((end - float(ev["time"])) * 100))
             dur_cs = max(1, min(dur_cs, 60000))
@@ -156,12 +163,29 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
         text = "".join(seg).rstrip()
         events.append(f"Dialogue: 0,{_fmt_ass_time(start)},{_fmt_ass_time(end)},Chord,,0,0,0,,{text}")
 
+        # 다음 코드 라인 미리보기 (회색 작은 글씨, 현재 줄 아래)
+        if i + 1 < len(chord_tl):
+            nxt = chord_tl[i + 1][2]
+            nxt_evs = nxt.get("chords") or []
+            if nxt_evs:
+                nxt_text = " ".join(
+                    _ass_escape(transpose_chord_text(ev.get("text", ""), chord_shift)) or "·"
+                    for ev in nxt_evs
+                )
+                events.append(f"Dialogue: 0,{_fmt_ass_time(start)},{_fmt_ass_time(end)},ChordNext,,0,0,0,,{nxt_text}")
+
     # --- 가사 줄 ---
-    for start, end, ln in lyric_tl:
+    for i, (start, end, ln) in enumerate(lyric_tl):
         txt = _ass_escape(ln.get("text", ""))
         if not txt:
             continue
         events.append(f"Dialogue: 1,{_fmt_ass_time(start)},{_fmt_ass_time(end)},Lyric,,0,0,0,,{txt}")
+
+        # 다음 가사 라인 미리보기 (회색 작은 글씨, 현재 줄 아래)
+        if i + 1 < len(lyric_tl):
+            nxt_txt = _ass_escape(lyric_tl[i + 1][2].get("text", ""))
+            if nxt_txt:
+                events.append(f"Dialogue: 1,{_fmt_ass_time(start)},{_fmt_ass_time(end)},LyricNext,,0,0,0,,{nxt_txt}")
 
     return header + "\n".join(events) + "\n"
 
