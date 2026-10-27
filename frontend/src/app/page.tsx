@@ -246,31 +246,27 @@ export default function KaraokePage() {
   const [lyricsPasteText, setLyricsPasteText] = useState("");
   const [lyricsEditText, setLyricsEditText] = useState("");
   const [lyricsShow, setLyricsShow] = useState(true);          // 오버레이 on/off
-  // ---- Lyrics 표시 영역: 영상 하단 고정 레터박스 밴드 (드래그 없음) ----
-  const [lyricsBandPct, setLyricsBandPct] = useState(26); // 밴드 높이 (% of video box)
+  // ---- Lyrics 스트립 높이 (가사 3줄 분량으로 타이트 고정, px) ----
+  const [lyricsBandH, setLyricsBandH] = useState(112);
 
   useEffect(() => {
     try {
       const raw = window.localStorage.getItem("karaoke_ui_settings_v1");
       const s = raw ? JSON.parse(raw) : {};
-      if (typeof s.lyricsBandPct === "number" && s.lyricsBandPct >= 10 && s.lyricsBandPct <= 60)
-        setLyricsBandPct(s.lyricsBandPct);
+      if (typeof s.lyricsBandH === "number" && s.lyricsBandH >= 64 && s.lyricsBandH <= 320)
+        setLyricsBandH(s.lyricsBandH);
     } catch {}
   }, []);
 
-  const persistLyricsBand = (pct: number) => {
+  const setLyricsBand = (h: number) => {
+    const v = Math.min(320, Math.max(64, Math.round(h)));
+    setLyricsBandH(v);
     try {
       const raw = window.localStorage.getItem("karaoke_ui_settings_v1");
       const s = raw ? JSON.parse(raw) : {};
-      s.lyricsBandPct = pct;
+      s.lyricsBandH = v;
       window.localStorage.setItem("karaoke_ui_settings_v1", JSON.stringify(s));
     } catch {}
-  };
-
-  const setLyricsBand = (pct: number) => {
-    const v = Math.min(60, Math.max(12, Math.round(pct)));
-    setLyricsBandPct(v);
-    persistLyricsBand(v);
   };
 
 
@@ -1745,11 +1741,11 @@ export default function KaraokePage() {
         </div>
       </div>
 
-      {/* Lyrics strip — 영상과 겹치지 않는 별도 영역 (영상 아래 가사 전용 스트립) */}
+      {/* Lyrics strip — 영상과 겹치지 않는 별도 영역 (가사 3줄 분량, 타이트) */}
       {lyrics && lyricsShow ? (
         <div
-          className="flex-none flex items-center justify-center px-6 bg-black border-t border-zinc-900"
-          style={{ height: `${lyricsBandPct}%`, minHeight: 56 }}
+          className="flex-none flex items-center justify-center px-6 bg-black border-t border-zinc-900 overflow-hidden"
+          style={{ height: lyricsBandH }}
         >
           {lyricActiveIdx >= 0 ? (
             <div className="max-w-[85%] space-y-1 text-center">
