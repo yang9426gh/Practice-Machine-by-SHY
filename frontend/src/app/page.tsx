@@ -447,7 +447,7 @@ export default function KaraokePage() {
     return offsetRef.current + Math.max(0, ctx.currentTime - startedAtRef.current);
   };
 
-  // 편집기 텍스트커서 위치에 현재 재생 시간 스탬프 삽입
+  // 편집기 텍스트커서 위치에 현재 재생 시간 스탬프 삽입 후 커서를 다음 줄 맨 앞으로 (연타 워크플로)
   const stampAtCursor = () => {
     const el = document.getElementById("lyrics-edit-area") as HTMLTextAreaElement | null;
     const t = Math.max(0, currentPositionLive());
@@ -459,38 +459,80 @@ export default function KaraokePage() {
       setLyricsEditText((prev) => (prev ? `${prev.replace(/\s*$/, "")}\n${stamp} ` : `${stamp} `));
       return;
     }
-    // 삽입 전 스크롤 위치 저장 (focus/커서 이동이 스크롤을 강제 이동시키는 것 방지)
+    // 삽입 전 textarea/모달 스크롤 위치 저장 (focus가 스크롤을 강제 이동시키는 것 방지)
     const prevScrollTop = el.scrollTop;
     const scroller = el.closest("[data-lyrics-scroll]") as HTMLElement | null;
     const prevScrollerTop = scroller ? scroller.scrollTop : null;
     const start = el.selectionStart ?? lyricsEditText.length;
     const end = el.selectionEnd ?? start;
-    const before = lyricsEditText.slice(0, start);
-    const after = lyricsEditText.slice(end);
-    // 커서 앞 글자가 스탬프 시작 대괄호/숫자면 그 줄의 기존 스탬프 교체 (덮어쓰기)
+    const text = lyricsEditText;
+    const before = text.slice(0, start);
+    const after = text.slice(end);
+    // 커서가 있는 줄이 스탬프만 있는 줄이면 기존 스탬프 교체(덮어쓰기)
     const lineStart = before.lastIndexOf("\n") + 1;
-    const curLine = before.slice(lineStart) + after.slice(0, after.indexOf("\n") < 0 ? after.length : after.indexOf("\n"));
+    const nlAfter = after.indexOf("\n");
+    const curLine = before.slice(lineStart) + (nlAfter < 0 ? after : after.slice(0, nlAfter));
     const existing = curLine.match(/^\s*\[\d{1,3}:\d{1,2}(?:[.:]\d{1,3})?\]\s*$/);
-    const insert = ` ${stamp}`;
+    const insertText = `${stamp} `;
     let newText: string;
-    let caret: number;
-    if (existing && lineStart !== start) {
-      // 현재 줄이 스탬프만 있는 줄 → 기존 스탬프 뒤 공백까지 교체 후 새 스탬프 삽입
-      const lineEnd = lineStart + curLine.length;
-      newText = (lyricsEditText.slice(0, lineStart) + stamp + " " + lyricsEditText.slice(lineEnd)).replace(/\n{3,}/g, "\n\n");
-      caret = lineStart + stamp.length + 1;
+    let insertPos: number;
+    if (existing && start > lineStart) {
+      newText = text.slice(0, lineStart) + insertText + text.slice(lineStart + curLine.length);
+      insertPos = lineStart;
     } else {
-      newText = before + insert + after;
-      caret = start + insert.length;
+      // 줄 중간에 삽입 시 앞 글자가 비공백이면 공백 하나 두고 붙임
+      const prevCh = start > 0 ? text[start - 1] : "\n";
+      const pad = start === 0 || /\s/.test(prevCh) ? "" : " ";
+      newText = before + pad + insertText + after;
+      insertPos = start + pad.length;
+    }
+    // 커서 → 다음 줄 맨 앞 (마지막 줄이면 새 줄 추가)
+    let caret: number;
+    const nlIdx = newText.indexOf("\n", insertPos);
+    if (nlIdx < 0) {
+      newText += "\n";
+      caret = newText.length;
+    } else {
+      caret = nlIdx + 1;
     }
     setLyricsEditText(newText);
-    // 삽입 후 커서를 스탬프 뒤로 이동 + 원래 스크롤 위치 복원 (커서는 같은 줄에 있으니 화면 고정)
     requestAnimationFrame(() => {
       el.focus();
       el.setSelectionRange(caret, caret);
-      el.scrollTop = prevScrollTop;
+      // 기본 스크롤 점프 억제: 원래 위치 복원, 단 커서 줄이 완전히 안 보이면 최소한만 이동
+      const lh = parseFloat(getComputedStyle(el).lineHeight) || 20;
+      const lineIdx = newText.slice(0, caret).split("\n").length - 1;
+      const caretTop = lineIdx * lh;
+      let st = prevScrollTop;
+      if (caretTop < st) st = caretTop;
+      else if (caretTop + lh > st + el.clientHeight) st = caretTop + lh - el.clientHeight;
+      el.scrollTop = st;
       if (scroller && prevScrollerTop != null) scroller.scrollTop = prevScrollerTop;
     });
+  };
+
+  // 편집창에서 기록된 스탬프 클릭 → 해당 시각으로 시크
+  const handleEditClick = () => {
+    const el = document.getElementById("lyrics-edit-area") as HTMLTextAreaElement | null;
+    if (!el) return;
+    const pos = el.selectionStart;
+    if (el.selectionStart !== el.selectionEnd) return; // 드래그 선택은 무시
+    const text = lyricsEditText;
+    const lineStart = text.lastIndexOf("\n", pos - 1) + 1;
+    let lineEnd = text.indexOf("\n", pos);
+    if (lineEnd < 0) lineEnd = text.length;
+    const line = text.slice(lineStart, lineEnd);
+    const off = pos - lineStart;
+    const re = /\[(\d{1,3}):(\d{1,2}(?:[.:]\d{1,3})?)\]/g;
+    let m: RegExpExecArray | null;
+    while ((m = re.exec(line)) !== null) {
+      // 클릭 지점이 스탬프 토큰 내부(선행 [ 제외, 마지막 글자 포함)인지
+      if (off >= m.index + 1 && off <= m.index + m[0].length) {
+        const t = parseInt(m[1], 10) * 60 + parseFloat(m[2].replace(":", "."));
+        if (isFinite(t)) void seekTo(Math.max(0, t));
+        break;
+      }
+    }
   };
 
   // 가사 생성 — 빈 편집창 바로 시작 (수동 싱크 워크플로)
@@ -2242,6 +2284,7 @@ export default function KaraokePage() {
                   className="w-full h-72 bg-zinc-900 border border-zinc-700 rounded-lg px-3 py-2 text-sm font-mono"
                   value={lyricsEditText}
                   onChange={(e) => setLyricsEditText(e.target.value)}
+                  onClick={handleEditClick}
                 />
                 <div className="flex gap-2">
                   <button
