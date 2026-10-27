@@ -155,5 +155,25 @@ def _worker_loop():
 
 def _on_progress(video_id: str, stage: str, progress: int) -> None:
     # 파이프라인 stage → 큐 status 매핑
-    status = stage if stage in ("downloading", "separating", "processing") else "processing"
-    queue_update(video_id, status=status, stage=stage, progress=int(progress))
+    if stage in ("downloading_video", "downloading_audio"):
+        status = "downloading"
+    elif stage == "separating":
+        status = "separating"
+    else:
+        status = "processing"
+    queue_update(video_id, status=status, stage=stage, progress=_unified_progress(stage, progress))
+
+
+# 곡 전체 통합 진행률: 영상 다운로드 0-20 / 오디오 다운로드 20-40 / 스템 분리 40-100
+_STAGE_WEIGHTS = {
+    "downloading_video": (0, 20),
+    "downloading_audio": (20, 40),
+    "separating": (40, 100),
+}
+
+
+def _unified_progress(stage: str, progress: int) -> int:
+    """단계별 progress(각 0~100)를 곡 전체 0~100으로 환산."""
+    lo, hi = _STAGE_WEIGHTS.get(stage, (0, 100))
+    p = max(0, min(100, progress))
+    return int(lo + (hi - lo) * p / 100)
