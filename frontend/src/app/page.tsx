@@ -1328,7 +1328,12 @@ export default function KaraokePage() {
     setSemitones(0);
     setSemitonesPending(0);
 
-    // Load saved meta (bpm/key) from Library if present
+    // Load saved meta (bpm/key) from Library if present — 새 곡 로드 시 이전 곡 값은 먼저 리셋
+    setBpm("");
+    setBpmDetectedAt(null);
+    setBpmStartOffset(0);
+    setKeyTonic("C");
+    setKeyMode("major");
     try {
       const rr = await fetch(`${BACKEND}/presets/${encodeURIComponent(id)}`);
       const jj = await rr.json();
@@ -1348,7 +1353,7 @@ export default function KaraokePage() {
     setNowTitle("");
     setNowThumb("");
     setTaskId("");
-    // NOTE: do not reset bpm/key here; they may be restored from Library preset meta
+    // bpm/key는 위에서 프리셋 메타 복원 전에 리셋됨 (이전 곡 값 잔존 방지)
 
     resetPlayer();
 
@@ -1894,7 +1899,7 @@ export default function KaraokePage() {
                 title={lyrics ? "가사 표시 on/off" : "가사 가져오기"}
                 className={`px-3 py-2 rounded-lg border text-sm ${status === "completed" ? "border-zinc-700 hover:bg-zinc-900" : "border-zinc-800 text-zinc-600 cursor-not-allowed"} ${lyrics && lyricsShow ? "border-blue-700 text-blue-200" : ""}`}
               >
-                가사 {lyrics ? (lyricsShow ? "표시중" : "숨김") : "가져오기"}
+                {lyrics ? (lyricsShow ? "가사 숨기기" : "가사 보기") : "가사 가져오기"}
               </button>
               {lyrics ? (
                 <>
