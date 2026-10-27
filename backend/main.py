@@ -1033,6 +1033,148 @@ async def transpose(task_id: str, semitones: int = 0):
 
 
 # -----------------------------
+# Lyrics (LRC) — LRCLIB import / manual paste / edit / fetch
+# -----------------------------
+from lyrics_store import (
+    parse_lrc,
+    serialize_lrc,
+    lrclib_get,
+    lrclib_search,
+    load_lrc,
+    save_lrc,
+    lyrics_path,
+    lrc_to_yaml,
+)
+
+
+@app.get("/lyrics/{video_id}")
+async def lyrics_get(video_id: str):
+    """저장된 가사 반환. 없으면 404 (프론트는 '가져오기' 버튼 노출)."""
+    text = load_lrc(DATA_DIR, video_id)
+    if text is None:
+        raise HTTPException(status_code=404, detail="no lyrics saved")
+    parsed = parse_lrc(text)
+    return {
+        "video_id": video_id,
+        "lrc": text,
+        "meta": parsed["meta"],
+        "lines": parsed["lines"],
+        "offset_ms": int(parsed["meta"].get("offset", 0) or 0),
+    }
+
+
+@app.put("/lyrics/{video_id}")
+async def lyrics_put(video_id: str, payload: dict = Body(default={})):  # noqa: B008
+    """LRC 텍스트 저장 (직접 붙여넣기 또는 편집). body: {lrc: "..."} 또는 {lines:[...], meta:{...}}"""
+    lrc_text = payload.get("lrc")
+    if lrc_text is None:
+        lines = payload.get("lines")
+        if lines is None:
+            raise HTTPException(status_code=400, detail="provide 'lrc' or 'lines'")
+        lrc_text = serialize_lrc(payload.get("meta") or {}, lines)
+    if not str(lrc_text).strip():
+        raise HTTPException(status_code=400, detail="empty lyrics")
+    save_lrc(DATA_DIR, video_id, str(lrc_text))
+    parsed = parse_lrc(str(lrc_text))
+    return {
+        "ok": True,
+        "lines": parsed["lines"],
+        "offset_ms": int(parsed["meta"].get("offset", 0) or 0),
+    }
+
+
+@app.delete("/lyrics/{video_id}")
+async def lyrics_delete(video_id: str):
+    if load_lrc(DATA_DIR, video_id) is None:
+        raise HTTPException(status_code=404, detail="no lyrics saved")
+    os.remove(lyrics_path(DATA_DIR, video_id))
+    return {"ok": True}
+
+
+@app.post("/lyrics/{video_id}/import")
+async def lyrics_import(video_id: str, payload: dict = Body(default={})):  # noqa: B008
+    """LRCLIB에서 가져오기.
+
+    body:
+      {title, artist, duration?}  → 정확 매칭(/api/get) 시도 → 실패 시 검색 결과 목록 반환
+      {candidate_id}              → 검색 결과에서 선택해 저장
+      {q}                         → 자유 검색
+    반환:
+      saved: true  → 저장 완료 (lines 포함)
+      candidates: [...]  → 매칭 실패, 사용자 선택 필요
+    """
+    title = (payload.get("title") or "").strip()
+    artist = (payload.get("artist") or "").strip()
+    duration = payload.get("duration")
+    q = (payload.get("q") or "").strip()
+    candidate_id = payload.get("candidate_id")
+
+    def _save_from(rec: dict) -> dict:
+        sl = rec.get("syncedLyrics")
+        if not sl:
+            raise HTTPException(status_code=422, detail="이 후보에는 동기화 가사가 없습니다 (일반 가사만 있음)")
+        if candidate_id or payload.get("force_save"):
+            # 검색 결과의 LRC는 헤더 태그 없는 경우가 많아 메타 보강
+            sl = f"[ti:{rec.get('trackName','')}]\n[ar:{rec.get('artistName','')}]\n" + sl
+        save_lrc(DATA_DIR, video_id, sl)
+        parsed = parse_lrc(sl)
+        return {"ok": True, "saved": True, "lines": parsed["lines"],
+                "offset_ms": int(parsed["meta"].get("offset", 0) or 0),
+                "source": {"id": rec.get("id"), "artist": rec.get("artistName"), "title": rec.get("trackName"), "duration": rec.get("duration")}}
+
+    # 1) 후보 선택 저장
+    if candidate_id:
+        cands = lrclib_search(q=q) if q else lrclib_search(artist=artist, title=title)
+        for rec in cands:
+            if str(rec.get("id")) == str(candidate_id):
+                return _save_from(rec)
+        raise HTTPException(status_code=404, detail="candidate not found (search again)")
+
+    # 2) 정확 매칭 (duration 있을 때 유리)
+    if title and artist:
+        try:
+            rec = lrclib_get(artist=artist, title=title, duration=float(duration) if duration else None)
+        except Exception:
+            rec = None
+        if rec and rec.get("syncedLyrics"):
+            return _save_from(rec)
+
+    # 3) 검색 후보 목록 반환
+    try:
+        cands = lrclib_search(artist=artist, title=title, q=q) if (artist or title or q) else []
+    except Exception as e:
+        raise HTTPException(status_code=502, detail=f"LRCLIB 검색 실패: {e}")
+
+    def _brief(rec: dict) -> dict:
+        return {
+            "id": rec.get("id"),
+            "artist": rec.get("artistName"),
+            "title": rec.get("trackName"),
+            "album": rec.get("albumName"),
+            "duration": rec.get("duration"),
+            "synced": bool(rec.get("syncedLyrics")),
+            "word_sync": bool(rec.get("hasWordSync")),
+            "preview": ((rec.get("syncedLyrics") or rec.get("plainLyrics") or "").splitlines() or [""])[0][:80],
+        }
+
+    return {"saved": False, "candidates": [_brief(r) for r in cands[:10]]}
+
+
+@app.get("/lyrics/{video_id}/yaml")
+async def lyrics_yaml(video_id: str):
+    """LRCLIB lyricsfile 호환 YAML로 내보내기 (향후 chord 확장 대비)."""
+    text = load_lrc(DATA_DIR, video_id)
+    if text is None:
+        raise HTTPException(status_code=404, detail="no lyrics saved")
+    parsed = parse_lrc(text)
+    from fastapi.responses import PlainTextResponse
+    return PlainTextResponse(
+        lrc_to_yaml(parsed["lines"], parsed["meta"]),
+        media_type="application/x-yaml",
+    )
+
+
+# -----------------------------
 # Static frontend serving (Next.js out/ — 단일 프로세스 배포)
 # -----------------------------
 FRONTEND_DIST = os.environ.get(
@@ -1048,7 +1190,7 @@ if os.path.isdir(FRONTEND_DIST):
     @app.get("/{full_path:path}", include_in_schema=False)
     async def serve_spa(full_path: str):
         # 삭제된 API 경로(/lyrics, /resync 등)는 SPA 폴백 대신 404 — 프론트가 HTML을 파싱하는 일 방지
-        removed_api = {"resync", "lyrics", "jobs"}
+        removed_api = {"resync"}
         first_seg = full_path.split("/")[0]
         if first_seg in removed_api:
             raise HTTPException(status_code=404, detail="Not found")

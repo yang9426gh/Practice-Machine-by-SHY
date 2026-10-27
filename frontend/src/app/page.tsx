@@ -9,6 +9,13 @@ const BACKEND = process.env.NEXT_PUBLIC_BACKEND_URL || (typeof window !== "undef
 type Status = "idle" | "processing" | "completed";
 
 type StemsMap = Record<string, string>; // stemName -> absolute URL
+type LyricLine = { time: number; text: string };
+type LyricsState = {
+  lines: LyricLine[];
+  offsetMs: number;
+  lrc: string;
+  source?: string;
+} | null;
 
 // Jobs UI removed
 
@@ -228,8 +235,32 @@ export default function KaraokePage() {
   const [audioReady, setAudioReady] = useState(false);
   const [audioDuration, setAudioDuration] = useState<number>(0);
 
+  // ---- Lyrics (LRC) ----
+  const [lyrics, setLyrics] = useState<LyricsState>(null);
+  const [lyricsOpen, setLyricsOpen] = useState(false);        // 모달: 가져오기/편집
+  const [lyricsMode, setLyricsMode] = useState<"menu" | "lrclib" | "paste" | "edit">("menu");
+  const [lyricsSearchTitle, setLyricsSearchTitle] = useState("");
+  const [lyricsSearchArtist, setLyricsSearchArtist] = useState("");
+  const [lyricsCandidates, setLyricsCandidates] = useState<any[]>([]);
+  const [lyricsSearchBusy, setLyricsSearchBusy] = useState(false);
+  const [lyricsPasteText, setLyricsPasteText] = useState("");
+  const [lyricsEditText, setLyricsEditText] = useState("");
+  const [lyricsShow, setLyricsShow] = useState(true);          // 오버레이 on/off
+
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const videoProgrammaticSeekAtRef = useRef<number>(0);
+
+  // 현재 시각에 맞는 가사 줄 인덱스 (offset_ms: +면 가사를 늦게 표시)
+  const lyricActiveIdx = React.useMemo(() => {
+    if (!lyrics?.lines?.length || !lyricsShow) return -1;
+    const t = (isScrubbing ? scrubPos : uiPos) - lyrics.offsetMs / 1000;
+    let idx = -1;
+    for (let i = 0; i < lyrics.lines.length; i++) {
+      if (lyrics.lines[i].time <= t + 0.02) idx = i;
+      else break;
+    }
+    return idx;
+  }, [lyrics, uiPos, isScrubbing, scrubPos, lyricsShow]);
 
   // WebAudio engine refs
   const audioCtxRef = useRef<AudioContext | null>(null);
@@ -246,6 +277,163 @@ export default function KaraokePage() {
   const offsetRef = useRef<number>(0); // seconds into track when last started
 
   const loadAbortRef = useRef<AbortController | null>(null);
+
+  // ---- Lyrics handlers ----
+  const lyricsFetchSaved = React.useCallback(async (vid: string) => {
+    if (!vid) return;
+    try {
+      const r = await fetch(`${BACKEND}/lyrics/${vid}`);
+      if (r.ok) {
+        const j = await r.json();
+        if (j.lines?.length) {
+          setLyrics({ lines: j.lines, offsetMs: j.offset_ms || 0, lrc: j.lrc, source: "saved" });
+          return;
+        }
+      }
+      setLyrics(null);
+    } catch {
+      /* ignore */
+    }
+  }, []);
+
+  const openLyricsMenu = () => {
+    setLyricsOpen(true);
+    setLyricsMode("menu");
+    setLyricsCandidates([]);
+    setLyricsPasteText("");
+    // 검색 기본값: 현재 곡 제목에서 paren/feat 제거 후 사용
+    const t = (nowTitle || "").replace(/\(.*?\)|\[.*?\]|feat\..*$/gi, "").trim();
+    setLyricsSearchTitle(t);
+    setLyricsSearchArtist("");
+  };
+
+  const lrclibSearch = async () => {
+    setLyricsSearchBusy(true);
+    setLyricsCandidates([]);
+    try {
+      const body: any = {};
+      if (lyricsSearchTitle) body.title = lyricsSearchTitle;
+      if (lyricsSearchArtist) body.artist = lyricsSearchArtist;
+      if (!body.title && !body.artist) {
+        const t = (nowTitle || "").trim();
+        if (t) body.q = t;
+      }
+      const r = await fetch(`${BACKEND}/lyrics/${videoId}/import`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ ...body, duration: audioDuration || undefined }),
+      });
+      const j = await r.json();
+      if (j.saved) {
+        setLyrics({ lines: j.lines, offsetMs: j.offset_ms || 0, lrc: "", source: j.source ? `${j.source.artist} - ${j.source.title} (LRCLIB)` : "LRCLIB" });
+        setLyricsOpen(false);
+        toast(`가사 가져옴: ${j.source?.title || "LRCLIB"}`);
+      } else if (j.candidates?.length) {
+        setLyricsCandidates(j.candidates);
+        toast(`${j.candidates.length}개 후보 — 선택하세요`);
+      } else {
+        toast("LRCLIB에서 찾지 못했습니다 — 직접 업로드를 이용하세요");
+      }
+    } catch (e: any) {
+      toast(`LRCLIB 검색 실패: ${String(e?.message || e)}`);
+    } finally {
+      setLyricsSearchBusy(false);
+    }
+  };
+
+  const lrclibPick = async (c: any) => {
+    setLyricsSearchBusy(true);
+    try {
+      const body: any = { candidate_id: String(c.id) };
+      if (lyricsSearchTitle) body.title = lyricsSearchTitle;
+      if (lyricsSearchArtist) body.artist = lyricsSearchArtist;
+      const r = await fetch(`${BACKEND}/lyrics/${videoId}/import`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+      });
+      const j = await r.json();
+      if (j.saved) {
+        setLyrics({ lines: j.lines, offsetMs: j.offset_ms || 0, lrc: "", source: `${c.artist} - ${c.title} (LRCLIB)` });
+        setLyricsOpen(false);
+        toast(`가사 가져옴: ${c.title}`);
+      } else {
+        toast("저장 실패 — 동기화 가사가 없는 후보일 수 있음");
+      }
+    } catch (e: any) {
+      toast(`가져오기 실패: ${String(e?.message || e)}`);
+    } finally {
+      setLyricsSearchBusy(false);
+    }
+  };
+
+  const lyricsSavePaste = async () => {
+    const text = lyricsPasteText.trim();
+    if (!text) return;
+    if (!/\[\d{1,3}:\d{1,2}/.test(text)) {
+      toast("타임스탬프가 없는 LRC입니다 — [mm:ss.xx] 형식 필요");
+      return;
+    }
+    try {
+      const r = await fetch(`${BACKEND}/lyrics/${videoId}`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ lrc: text }),
+      });
+      const j = await r.json();
+      if (r.ok && j.lines?.length) {
+        setLyrics({ lines: j.lines, offsetMs: j.offset_ms || 0, lrc: text, source: "직접 업로드" });
+        setLyricsOpen(false);
+        toast(`가사 저장 완료 (${j.lines.length}줄)`);
+      } else {
+        toast(`저장 실패: ${j.detail || "?"}`);
+      }
+    } catch (e: any) {
+      toast(`저장 실패: ${String(e?.message || e)}`);
+    }
+  };
+
+  const lyricsSaveEdit = async () => {
+    try {
+      const r = await fetch(`${BACKEND}/lyrics/${videoId}`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ lrc: lyricsEditText }),
+      });
+      const j = await r.json();
+      if (r.ok && j.lines?.length) {
+        setLyrics({ lines: j.lines, offsetMs: j.offset_ms || 0, lrc: lyricsEditText, source: lyrics?.source || "편집됨" });
+        setLyricsOpen(false);
+        toast("가사 편집 저장 완료");
+      } else {
+        toast(`저장 실패: ${j.detail || "?"}`);
+      }
+    } catch (e: any) {
+      toast(`저장 실패: ${String(e?.message || e)}`);
+    }
+  };
+
+  const lyricsSaveOffset = async (ms: number) => {
+    setLyrics((prev) => (prev ? { ...prev, offsetMs: ms } : prev));
+    // LRC 헤더의 [offset:ms] 태그로 영구 저장
+    try {
+      const r = await fetch(`${BACKEND}/lyrics/${videoId}`);
+      if (r.ok) {
+        const j = await r.json();
+        let lrc: string = j.lrc || "";
+        lrc = lrc.replace(/^\[offset:[^\]]*\]\n?/mi, "").replace(/\n\[offset:[^\]]*\]/mi, "");
+        const tag = ms === 0 ? "" : `[offset:${ms > 0 ? "+" : ""}${ms}]`;
+        const linesArr = lrc.split("\n");
+        const insertAt = linesArr.findIndex((l) => !/^\[(ti|ar|al|length):/i.test(l));
+        if (tag) linesArr.splice(insertAt < 0 ? 0 : insertAt, 0, tag);
+        await fetch(`${BACKEND}/lyrics/${videoId}`, {
+          method: "PUT",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ lrc: linesArr.join("\n") }),
+        });
+      }
+    } catch {}
+  };
 
   const toast = (msg: string, ms: number = 2200) => {
     setToastMsg(msg);
@@ -1066,6 +1254,18 @@ export default function KaraokePage() {
       // If user is still on the select screen, default to Master mode after first load.
       setMixMode((m) => (m.kind === "select" ? { kind: "master" } : m));
       toast("Stems ready — decoding audio…");
+
+      // 저장된 가사 있으면 자동 로드 (자동 가져오기는 하지 않음 — 버튼으로)
+      fetch(`${BACKEND}/lyrics/${id}`)
+        .then((r) => (r.ok ? r.json() : null))
+        .then((j) => {
+          if (j && j.lines?.length) {
+            setLyrics({ lines: j.lines, offsetMs: j.offset_ms || 0, lrc: j.lrc, source: "saved" });
+          } else {
+            setLyrics(null);
+          }
+        })
+        .catch(() => {});
     };
 
     // If backend already has cached output, it may return completed immediately.
@@ -1294,6 +1494,22 @@ export default function KaraokePage() {
             <div className="absolute top-3 left-3 max-w-[75%] rounded-xl border border-zinc-800 bg-black/60 backdrop-blur px-3 py-2 text-white text-sm sm:text-base font-semibold shadow">
               {nowTitle || videoId}
             </div>
+            {/* Lyrics overlay */}
+            {lyrics && lyricsShow && lyricActiveIdx >= 0 ? (
+              <div className="absolute inset-x-0 bottom-10 flex flex-col items-center px-6 pointer-events-none select-none">
+                <div className="max-w-[85%] space-y-1 text-center">
+                  {lyricActiveIdx > 0 ? (
+                    <div className="text-sm sm:text-base text-zinc-400/80 truncate">{lyrics.lines[lyricActiveIdx - 1].text}</div>
+                  ) : null}
+                  <div className="text-xl sm:text-3xl font-bold text-white drop-shadow-[0_2px_8px_rgba(0,0,0,0.9)] break-keep">
+                    {lyrics.lines[lyricActiveIdx].text}
+                  </div>
+                  {lyricActiveIdx + 1 < lyrics.lines.length ? (
+                    <div className="text-sm sm:text-base text-zinc-300/80 truncate">{lyrics.lines[lyricActiveIdx + 1].text}</div>
+                  ) : null}
+                </div>
+              </div>
+            ) : null}
           </div>
         ) : videoId ? (
           <div className="h-full w-full flex items-center justify-center bg-black">
@@ -1449,6 +1665,52 @@ export default function KaraokePage() {
           </div>
 
           <div className="flex items-center justify-center gap-3 flex-wrap">
+            {/* Lyrics button + offset */}
+            <div className="flex items-center gap-2">
+              <button
+                onClick={() => (lyrics ? setLyricsShow((v) => !v) : openLyricsMenu())}
+                disabled={status !== "completed"}
+                title={lyrics ? "가사 표시 on/off" : "가사 가져오기"}
+                className={`px-3 py-2 rounded-lg border text-sm ${status === "completed" ? "border-zinc-700 hover:bg-zinc-900" : "border-zinc-800 text-zinc-600 cursor-not-allowed"} ${lyrics && lyricsShow ? "border-blue-700 text-blue-200" : ""}`}
+              >
+                가사 {lyrics ? (lyricsShow ? "표시중" : "숨김") : "가져오기"}
+              </button>
+              {lyrics ? (
+                <>
+                  <button
+                    onClick={() => {
+                      setLyricsEditText(lyrics.lrc || "");
+                      setLyricsOpen(true);
+                      setLyricsMode("edit");
+                    }}
+                    className="px-2 py-2 rounded-lg border border-zinc-700 text-sm hover:bg-zinc-900"
+                    title="LRC 편집"
+                  >
+                    편집
+                  </button>
+                  <div className="flex items-center gap-1" title="가사 오프셋 (초)">
+                    <button
+                      onClick={() => lyricsSaveOffset(lyrics.offsetMs - 250)}
+                      className="px-2 py-1 rounded-md border border-zinc-700 text-xs hover:bg-zinc-900"
+                    >
+                      −0.25s
+                    </button>
+                    <div className="text-[11px] font-mono text-zinc-400 w-14 text-center">
+                      {(lyrics.offsetMs / 1000).toFixed(2)}s
+                    </div>
+                    <button
+                      onClick={() => lyricsSaveOffset(lyrics.offsetMs + 250)}
+                      className="px-2 py-1 rounded-md border border-zinc-700 text-xs hover:bg-zinc-900"
+                    >
+                      +0.25s
+                    </button>
+                  </div>
+                </>
+              ) : null}
+            </div>
+
+            <div className="w-px h-6 bg-zinc-800" />
+
             <div className="flex items-center gap-2">
               <div className="text-xs text-zinc-400">BPM</div>
               <input
@@ -1735,6 +1997,144 @@ export default function KaraokePage() {
       </div>
 
       {/* Jobs modal removed */}
+
+      {/* Lyrics modal: menu / lrclib / paste / edit */}
+      {lyricsOpen ? (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-4" onClick={() => setLyricsOpen(false)}>
+          <div
+            className="w-full max-w-lg rounded-2xl border border-zinc-800 bg-zinc-950 p-5 space-y-4 max-h-[85vh] overflow-auto"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="flex items-center justify-between">
+              <div className="text-lg font-bold text-zinc-100">가사 {lyricsMode === "edit" ? "편집" : "가져오기"}</div>
+              <button onClick={() => setLyricsOpen(false)} className="text-zinc-500 hover:text-zinc-200 text-sm px-2">✕</button>
+            </div>
+
+            {lyricsMode === "menu" ? (
+              <div className="grid grid-cols-1 gap-3">
+                <button
+                  onClick={() => setLyricsMode("lrclib")}
+                  className="rounded-xl border border-zinc-700 bg-zinc-900/60 px-4 py-5 text-left hover:bg-zinc-900"
+                >
+                  <div className="text-base font-semibold text-zinc-100">1. LRCLIB에서 가져오기</div>
+                  <div className="text-xs text-zinc-500 mt-1">lrclib.net — 싱크된 가사 DB에서 자동 검색</div>
+                </button>
+                <button
+                  onClick={() => setLyricsMode("paste")}
+                  className="rounded-xl border border-zinc-700 bg-zinc-900/60 px-4 py-5 text-left hover:bg-zinc-900"
+                >
+                  <div className="text-base font-semibold text-zinc-100">2. 가사 직접 업로드 (LRC)</div>
+                  <div className="text-xs text-zinc-500 mt-1">LRCLIB 등에서 복사한 LRC 텍스트를 붙여넣기</div>
+                </button>
+              </div>
+            ) : null}
+
+            {lyricsMode === "lrclib" ? (
+              <div className="space-y-3">
+                <div className="grid grid-cols-2 gap-2">
+                  <input
+                    className="bg-zinc-900 border border-zinc-700 rounded-lg px-3 py-2 text-sm"
+                    placeholder="곡 제목"
+                    value={lyricsSearchTitle}
+                    onChange={(e) => setLyricsSearchTitle(e.target.value)}
+                    onKeyDown={(e) => e.key === "Enter" && lrclibSearch()}
+                  />
+                  <input
+                    className="bg-zinc-900 border border-zinc-700 rounded-lg px-3 py-2 text-sm"
+                    placeholder="아티스트"
+                    value={lyricsSearchArtist}
+                    onChange={(e) => setLyricsSearchArtist(e.target.value)}
+                    onKeyDown={(e) => e.key === "Enter" && lrclibSearch()}
+                  />
+                </div>
+                <button
+                  onClick={lrclibSearch}
+                  disabled={lyricsSearchBusy}
+                  className="w-full px-3 py-2 rounded-lg border border-blue-700 text-blue-200 text-sm hover:bg-blue-950/30 disabled:opacity-50"
+                >
+                  {lyricsSearchBusy ? "검색 중…" : "LRCLIB 검색"}
+                </button>
+
+                {lyricsCandidates.length ? (
+                  <div className="space-y-2 max-h-[300px] overflow-auto pr-1">
+                    {lyricsCandidates.map((c) => (
+                      <button
+                        key={c.id}
+                        onClick={() => lrclibPick(c)}
+                        disabled={!c.synced || lyricsSearchBusy}
+                        className={`w-full text-left rounded-lg border p-3 ${c.synced ? "border-zinc-700 hover:bg-zinc-900" : "border-zinc-900 opacity-50 cursor-not-allowed"}`}
+                      >
+                        <div className="flex items-center justify-between gap-2">
+                          <div className="text-sm text-zinc-200 truncate">{c.artist} — {c.title}</div>
+                          <div className="text-[11px] text-zinc-500 shrink-0">
+                            {c.duration ? `${Math.floor(c.duration / 60)}:${String(Math.round(c.duration % 60)).padStart(2, "0")}` : "?"} {c.synced ? "✓싱크" : "싱크없음"}
+                          </div>
+                        </div>
+                        <div className="text-[11px] text-zinc-500 truncate mt-0.5">{c.preview}</div>
+                      </button>
+                    ))}
+                  </div>
+                ) : (
+                  <div className="text-xs text-zinc-500">
+                    곡 제목이 자동으로 채워집니다. 틀리면 수정 후 검색하세요. (유튜브 제목과 음원 제목이 다를 수 있음)
+                  </div>
+                )}
+              </div>
+            ) : null}
+
+            {lyricsMode === "paste" ? (
+              <div className="space-y-3">
+                <div className="text-xs text-zinc-500">
+                  LRC 형식 예: <code className="text-zinc-400">[00:12.50] 가사 한 줄</code> — lrclib.net에서 곡을 찾아 {"{...}"} 버튼으로 복사한 뒤 붙여넣으세요.
+                </div>
+                <textarea
+                  className="w-full h-64 bg-zinc-900 border border-zinc-700 rounded-lg px-3 py-2 text-sm font-mono"
+                  placeholder={"[ti:곡제목]\n[ar:아티스트]\n[00:12.50] 첫 번째 가사 줄\n[00:16.02] 두 번째 줄"}
+                  value={lyricsPasteText}
+                  onChange={(e) => setLyricsPasteText(e.target.value)}
+                />
+                <button
+                  onClick={lyricsSavePaste}
+                  className="w-full px-3 py-2 rounded-lg border border-blue-700 text-blue-200 text-sm hover:bg-blue-950/30"
+                >
+                  저장
+                </button>
+              </div>
+            ) : null}
+
+            {lyricsMode === "edit" ? (
+              <div className="space-y-3">
+                <div className="text-xs text-zinc-500">LRC 원문을 직접 수정합니다. 타임스탬프와 가사를 모두 고칠 수 있어요.</div>
+                <textarea
+                  className="w-full h-72 bg-zinc-900 border border-zinc-700 rounded-lg px-3 py-2 text-sm font-mono"
+                  value={lyricsEditText}
+                  onChange={(e) => setLyricsEditText(e.target.value)}
+                />
+                <div className="flex gap-2">
+                  <button
+                    onClick={lyricsSaveEdit}
+                    className="flex-1 px-3 py-2 rounded-lg border border-blue-700 text-blue-200 text-sm hover:bg-blue-950/30"
+                  >
+                    저장
+                  </button>
+                  <button
+                    onClick={async () => {
+                      if (!confirm("저장된 가사를 삭제할까요?")) return;
+                      await fetch(`${BACKEND}/lyrics/${videoId}`, { method: "DELETE" });
+                      setLyrics(null);
+                      setLyricsOpen(false);
+                      toast("가사 삭제됨");
+                    }}
+                    className="px-3 py-2 rounded-lg border border-red-900/60 text-red-300 text-sm"
+                  >
+                    삭제
+                  </button>
+                </div>
+              </div>
+            ) : null}
+          </div>
+        </div>
+      ) : null}
     </main>
   );
 }
