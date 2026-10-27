@@ -460,6 +460,53 @@ export default function KaraokePage() {
     }
   };
 
+  // 실시간 재생 위치 (uiPos 틱과 무관하게 즉시값 — 버튼 표시/스탬프용)
+  const currentPositionLive = () => {
+    const ctx = audioCtxRef.current;
+    if (!ctx || !isPlayingRef.current) return offsetRef.current;
+    return offsetRef.current + Math.max(0, ctx.currentTime - startedAtRef.current);
+  };
+
+  // 편집기 텍스트커서 위치에 현재 재생 시간 스탬프 삽입
+  const stampAtCursor = () => {
+    const el = document.getElementById("lyrics-edit-area") as HTMLTextAreaElement | null;
+    const t = Math.max(0, currentPositionLive());
+    const mm = Math.floor(t / 60);
+    const ss = t - mm * 60;
+    const stamp = `[${String(mm).padStart(2, "0")}:${ss.toFixed(2).padStart(5, "0")}]`;
+    if (!el) {
+      // 폴백: 커서 정보 없으면 텍스트 끝에 추가
+      setLyricsEditText((prev) => (prev ? `${prev.replace(/\s*$/, "")}\n${stamp} ` : `${stamp} `));
+      return;
+    }
+    const start = el.selectionStart ?? lyricsEditText.length;
+    const end = el.selectionEnd ?? start;
+    const before = lyricsEditText.slice(0, start);
+    const after = lyricsEditText.slice(end);
+    // 커서 앞 글자가 스탬프 시작 대괄호/숫자면 그 줄의 기존 스탬프 교체 (덮어쓰기)
+    const lineStart = before.lastIndexOf("\n") + 1;
+    const curLine = before.slice(lineStart) + after.slice(0, after.indexOf("\n") < 0 ? after.length : after.indexOf("\n"));
+    const existing = curLine.match(/^\s*\[\d{1,3}:\d{1,2}(?:[.:]\d{1,3})?\]\s*$/);
+    const insert = ` ${stamp}`;
+    let newText: string;
+    let caret: number;
+    if (existing && lineStart !== start) {
+      // 현재 줄이 스탬프만 있는 줄 → 기존 스탬프 뒤 공백까지 교체 후 새 스탬프 삽입
+      const lineEnd = lineStart + curLine.length;
+      newText = (lyricsEditText.slice(0, lineStart) + stamp + " " + lyricsEditText.slice(lineEnd)).replace(/\n{3,}/g, "\n\n");
+      caret = lineStart + stamp.length + 1;
+    } else {
+      newText = before + insert + after;
+      caret = start + insert.length;
+    }
+    setLyricsEditText(newText);
+    // 삽입 후 커서를 스탬프 뒤로 이동
+    requestAnimationFrame(() => {
+      el.focus();
+      el.setSelectionRange(caret, caret);
+    });
+  };
+
   const toast = (msg: string, ms: number = 2200) => {
     setToastMsg(msg);
     if (toastTimerRef.current) clearTimeout(toastTimerRef.current);
@@ -2150,7 +2197,43 @@ export default function KaraokePage() {
             {lyricsMode === "edit" ? (
               <div className="space-y-3">
                 <div className="text-xs text-zinc-500">LRC 원문을 직접 수정합니다. 타임스탬프와 가사를 모두 고칠 수 있어요.</div>
+                {/* Transport: 재생 컨트롤 + 커서 위치 스탬프 */}
+                <div className="flex items-center gap-2 rounded-lg border border-zinc-800 bg-zinc-900/60 px-2 py-1.5">
+                  <button
+                    onClick={togglePlay}
+                    className="px-2.5 py-1 rounded-md border border-zinc-700 text-xs hover:bg-zinc-800"
+                    title={isPlaying ? "일시정지" : "재생"}
+                  >
+                    {isPlaying ? "⏸" : "▶"}
+                  </button>
+                  <button
+                    onClick={() => jumpSeconds(-5)}
+                    className="px-2 py-1 rounded-md border border-zinc-700 text-xs hover:bg-zinc-800"
+                    title="5초 뒤로"
+                  >
+                    −5s
+                  </button>
+                  <button
+                    onClick={() => jumpSeconds(5)}
+                    className="px-2 py-1 rounded-md border border-zinc-700 text-xs hover:bg-zinc-800"
+                    title="5초 앞으로"
+                  >
+                    +5s
+                  </button>
+                  <div className="text-[11px] font-mono text-zinc-400 w-12 text-center">
+                    {fmtTime(currentPositionLive())}
+                  </div>
+                  <div className="flex-1" />
+                  <button
+                    onClick={stampAtCursor}
+                    className="px-2 py-1 rounded-md border border-blue-700 text-blue-200 text-xs hover:bg-blue-950/30"
+                    title="텍스트 커서 위치에 현재 재생 시간의 타임스탬프 삽입"
+                  >
+                    ⏱ 스탬프
+                  </button>
+                </div>
                 <textarea
+                  id="lyrics-edit-area"
                   className="w-full h-72 bg-zinc-900 border border-zinc-700 rounded-lg px-3 py-2 text-sm font-mono"
                   value={lyricsEditText}
                   onChange={(e) => setLyricsEditText(e.target.value)}
