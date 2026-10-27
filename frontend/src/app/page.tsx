@@ -1689,28 +1689,8 @@ export default function KaraokePage() {
             <div className="absolute top-3 left-3 max-w-[75%] rounded-xl border border-zinc-800 bg-black/60 backdrop-blur px-3 py-2 text-white text-sm sm:text-base font-semibold shadow">
               {nowTitle || videoId}
             </div>
-            {/* Lyrics band — 영상 하단 고정 레터박스 밴드 (영상 위에 반투명 검정, 가사 전용 영역) */}
-            {lyrics && lyricsShow && lyricActiveIdx >= 0 ? (
-              <div
-                className="absolute inset-x-0 bottom-0 z-20 flex flex-col items-center justify-center px-6 pointer-events-none bg-gradient-to-t from-black/85 via-black/55 to-transparent"
-                style={{ height: `${lyricsBandPct}%` }}
-              >
-                <div className="max-w-[80%] space-y-1 text-center">
-                  {lyricActiveIdx > 0 ? (
-                    <div className="text-sm sm:text-base text-zinc-400/80 truncate">{lyricLines[lyricActiveIdx - 1].text}</div>
-                  ) : null}
-                  <div className="text-xl sm:text-3xl font-bold text-white drop-shadow-[0_2px_8px_rgba(0,0,0,0.9)] break-keep">
-                    {lyricLines[lyricActiveIdx].text}
-                  </div>
-                  {lyricActiveIdx + 1 < lyricLines.length ? (
-                    <div className="text-sm sm:text-base text-zinc-300/80 truncate">{lyricLines[lyricActiveIdx + 1].text}</div>
-                  ) : null}
-                </div>
-              </div>
-            ) : null}
           </div>
         ) : videoId ? (
-          <div className="h-full w-full flex items-center justify-center bg-black">
             <div className="text-center space-y-3 max-w-md px-6">
               {nowThumb ? (
                 // eslint-disable-next-line @next/next/no-img-element
@@ -1763,6 +1743,30 @@ export default function KaraokePage() {
           <div className={`h-0.5 w-full transition-colors ${videoResizing ? "bg-blue-500" : "bg-transparent group-hover:bg-blue-500/60"}`} />
         </div>
       </div>
+
+      {/* Lyrics strip — 영상과 겹치지 않는 별도 영역 (영상 아래 가사 전용 스트립) */}
+      {lyrics && lyricsShow ? (
+        <div
+          className="flex-none flex items-center justify-center px-6 bg-black border-t border-zinc-900"
+          style={{ height: `${lyricsBandPct}%`, minHeight: 56 }}
+        >
+          {lyricActiveIdx >= 0 ? (
+            <div className="max-w-[85%] space-y-1 text-center">
+              {lyricActiveIdx > 0 ? (
+                <div className="text-sm sm:text-base text-zinc-500 truncate">{lyricLines[lyricActiveIdx - 1].text}</div>
+              ) : null}
+              <div className="text-xl sm:text-3xl font-bold text-white break-keep">
+                {lyricLines[lyricActiveIdx].text}
+              </div>
+              {lyricActiveIdx + 1 < lyricLines.length ? (
+                <div className="text-sm sm:text-base text-zinc-400 truncate">{lyricLines[lyricActiveIdx + 1].text}</div>
+              ) : null}
+            </div>
+          ) : (
+            <div className="text-zinc-700 text-lg">♪</div>
+          )}
+        </div>
+      ) : null}
 
       {/* Controls — 영상을 크게 키우면 남는 공간이 줄어드므로 내부 스크롤 허용 */}
       <div className="p-6 bg-zinc-900/80 border-t border-zinc-800 min-h-0 overflow-y-auto overscroll-contain">
