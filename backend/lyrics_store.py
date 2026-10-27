@@ -1,9 +1,10 @@
-"""가사 (LRC) — LRCLIB 가져오기 / LRC 붙여넣기 / 편집 저장.
+"""가사 (LRC) — LRCLIB 가져오기 / LRC 붙여넣기 / 편집 / 빈 스탬프.
 
-저장 형식: LRC 텍스트 그대로 (data/lyrics/<video_id>.lrc)
-+ 메타(offset_sec)는 DB tracks 테이블 컬럼이 아닌 LRC 헤더 태그로 저장:
-    [offset:+1200]  (밀리초, + = 가사가 늦게 나옴 → 표시 시간을 앞당김은 음수)
-확장 계획(코드/chord)을 위해 lines는 파싱해서 JSON으로도 제공.
+저장: 라이브러리 DB(presets.lyrics_lrc)에 LRC 원문 그대로 — LRCLIB fetch든
+수동 업로드든 편집이든 동일 포맷·동일 경로 (사용자 지정: DB 통합 저장).
+offset은 LRC 헤더 태그로 저장: [offset:+1200] (밀리초).
+빈 스탬프 = 타임스탬프만 있고 텍스트가 빈 줄. 표시 단계에서는 건너뛰고,
+편집기에서 텍스트를 채워 넣는 수동 싱크 워크플로용.
 """
 from __future__ import annotations
 
@@ -54,9 +55,7 @@ def parse_lrc(text: str) -> dict:
                 mm_, ss_, frac_ = m2.group(1), m2.group(2), m2.group(3)
                 f = float(f"0.{frac_}") if frac_ else 0.0
                 t = int(mm_) * 60 + int(ss_) + f
-                if content:
-                    lines.append({"time": round(t, 3), "text": content})
-        # 타임스탬프 없는 줄은 무시 (일반 텍스트 블록)
+                lines.append({"time": round(t, 3), "text": content})  # 빈 텍스트(빈 스탬프)도 보존
 
     lines.sort(key=lambda x: x["time"])
     return {"meta": meta, "lines": lines}
@@ -78,7 +77,11 @@ def serialize_lrc(meta: dict, lines: list[dict]) -> str:
         t = max(0.0, float(ln.get("time", 0)))
         mm = int(t // 60)
         ss = t - mm * 60
-        out.append(f"[{mm:02d}:{ss:05.2f}] {str(ln.get('text', '')).strip()}")
+        txt = str(ln.get("text", "")).strip()
+        if txt:
+            out.append(f"[{mm:02d}:{ss:05.2f}] {txt}")
+        else:
+            out.append(f"[{mm:02d}:{ss:05.2f}]")  # 빈 스탬프 — 텍스트 없이 시간만
     return "\n".join(out) + "\n"
 
 
@@ -163,29 +166,38 @@ def lrclib_search(artist: str = "", title: str = "", q: str = "") -> list[dict]:
 
 
 # -----------------------------
-# 저장/로드 (data/lyrics/<video_id>.lrc)
+# 저장/로드 — 단일 소스: 라이브러리 DB(presets.lyrics_lrc)
+# 구버전 파일(data/lyrics/<vid>.lrc)은 처음 로드 시 DB로 자동 이전 후 삭제.
 # -----------------------------
-def lyrics_dir(data_dir: str) -> str:
-    p = os.path.join(data_dir, "lyrics")
-    os.makedirs(p, exist_ok=True)
-    return p
-
-
 def lyrics_path(data_dir: str, video_id: str) -> str:
     safe = "".join(c for c in video_id if c.isalnum() or c in "-_")
-    return os.path.join(lyrics_dir(data_dir), f"{safe}.lrc")
+    return os.path.join(data_dir, "lyrics", f"{safe}.lrc")
 
 
 def load_lrc(data_dir: str, video_id: str) -> str | None:
+    """DB에서 LRC 조회. 파일만 있으면(구버전) DB로 이전 후 파일 삭제."""
+    from db import get_preset_lyrics, set_preset_lyrics
+    text = get_preset_lyrics(data_dir, video_id)
+    if text:
+        return text
     p = lyrics_path(data_dir, video_id)
     if os.path.isfile(p):
-        with open(p, "r", encoding="utf-8") as f:
-            return f.read()
+        try:
+            with open(p, "r", encoding="utf-8") as f:
+                legacy = f.read()
+        except Exception:
+            return None
+        if legacy.strip():
+            set_preset_lyrics(data_dir, video_id, legacy)  # DB로 이전
+            try:
+                os.remove(p)  # 파일은 더 이상 소스가 아님
+            except Exception:
+                pass
+            return legacy
     return None
 
 
-def save_lrc(data_dir: str, video_id: str, text: str) -> str:
-    p = lyrics_path(data_dir, video_id)
-    with open(p, "w", encoding="utf-8") as f:
-        f.write(text.replace("\r\n", "\n"))
-    return p
+def save_lrc(data_dir: str, video_id: str, text: str) -> None:
+    """DB에 저장 (fetch/수동/편집/스탬프 모두 동일 경로)."""
+    from db import set_preset_lyrics
+    set_preset_lyrics(data_dir, video_id, text.replace("\r\n", "\n"))

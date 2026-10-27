@@ -251,16 +251,21 @@ export default function KaraokePage() {
   const videoProgrammaticSeekAtRef = useRef<number>(0);
 
   // 현재 시각에 맞는 가사 줄 인덱스 (offset_ms: +면 가사를 늦게 표시)
+  // 빈 스탬프(텍스트 없는 줄)는 표시 대상에서 제외 — 시간 정보만 있음
+  const lyricLines = React.useMemo(
+    () => (lyrics ? lyrics.lines.filter((l) => (l.text || "").trim()) : []),
+    [lyrics]
+  );
   const lyricActiveIdx = React.useMemo(() => {
-    if (!lyrics?.lines?.length || !lyricsShow) return -1;
-    const t = (isScrubbing ? scrubPos : uiPos) - lyrics.offsetMs / 1000;
+    if (!lyricsShow || lyricLines.length === 0) return -1;
+    const t = (isScrubbing ? scrubPos : uiPos) - (lyrics?.offsetMs || 0) / 1000;
     let idx = -1;
-    for (let i = 0; i < lyrics.lines.length; i++) {
-      if (lyrics.lines[i].time <= t + 0.02) idx = i;
+    for (let i = 0; i < lyricLines.length; i++) {
+      if (lyricLines[i].time <= t + 0.02) idx = i;
       else break;
     }
     return idx;
-  }, [lyrics, uiPos, isScrubbing, scrubPos, lyricsShow]);
+  }, [lyricLines, lyrics?.offsetMs, uiPos, isScrubbing, scrubPos, lyricsShow]);
 
   // WebAudio engine refs
   const audioCtxRef = useRef<AudioContext | null>(null);
@@ -433,6 +438,26 @@ export default function KaraokePage() {
         });
       }
     } catch {}
+  };
+
+  // 빈 스탬프 — 재생 중 현재 위치의 타임스탬프만 기록 (가사는 나중에 편집기에서 채움)
+  const lyricsStampEmpty = async () => {
+    try {
+      const r = await fetch(`${BACKEND}/lyrics/${videoId}/stamp`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ position_sec: currentPosition() }),
+      });
+      const j = await r.json();
+      if (r.ok && j.ok) {
+        setLyrics({ lines: j.lines, offsetMs: j.offset_ms || 0, lrc: j.lrc, source: lyrics?.source || "빈 스탬프" });
+        toast(`스탬프 찍음 ${j.stamp} (빈 스탬프 ${j.empty_stamps}개)`);
+      } else {
+        toast(`스탬프 실패: ${j.detail || "?"}`);
+      }
+    } catch (e: any) {
+      toast(`스탬프 실패: ${String(e?.message || e)}`);
+    }
   };
 
   const toast = (msg: string, ms: number = 2200) => {
@@ -1499,13 +1524,13 @@ export default function KaraokePage() {
               <div className="absolute inset-x-0 bottom-10 flex flex-col items-center px-6 pointer-events-none select-none">
                 <div className="max-w-[85%] space-y-1 text-center">
                   {lyricActiveIdx > 0 ? (
-                    <div className="text-sm sm:text-base text-zinc-400/80 truncate">{lyrics.lines[lyricActiveIdx - 1].text}</div>
+                    <div className="text-sm sm:text-base text-zinc-400/80 truncate">{lyricLines[lyricActiveIdx - 1].text}</div>
                   ) : null}
                   <div className="text-xl sm:text-3xl font-bold text-white drop-shadow-[0_2px_8px_rgba(0,0,0,0.9)] break-keep">
-                    {lyrics.lines[lyricActiveIdx].text}
+                    {lyricLines[lyricActiveIdx].text}
                   </div>
-                  {lyricActiveIdx + 1 < lyrics.lines.length ? (
-                    <div className="text-sm sm:text-base text-zinc-300/80 truncate">{lyrics.lines[lyricActiveIdx + 1].text}</div>
+                  {lyricActiveIdx + 1 < lyricLines.length ? (
+                    <div className="text-sm sm:text-base text-zinc-300/80 truncate">{lyricLines[lyricActiveIdx + 1].text}</div>
                   ) : null}
                 </div>
               </div>
@@ -1665,7 +1690,7 @@ export default function KaraokePage() {
           </div>
 
           <div className="flex items-center justify-center gap-3 flex-wrap">
-            {/* Lyrics button + offset */}
+            {/* Lyrics button + stamp + offset */}
             <div className="flex items-center gap-2">
               <button
                 onClick={() => (lyrics ? setLyricsShow((v) => !v) : openLyricsMenu())}
@@ -1675,11 +1700,31 @@ export default function KaraokePage() {
               >
                 가사 {lyrics ? (lyricsShow ? "표시중" : "숨김") : "가져오기"}
               </button>
+              {status === "completed" ? (
+                <button
+                  onClick={lyricsStampEmpty}
+                  title="재생 중 현재 위치에 빈 타임스탬프 찍기 — 나중에 편집기에서 가사 채우기"
+                  className="px-3 py-2 rounded-lg border border-zinc-700 text-sm hover:bg-zinc-900"
+                >
+                  빈 스탬프
+                </button>
+              ) : null}
               {lyrics ? (
                 <>
                   <button
-                    onClick={() => {
-                      setLyricsEditText(lyrics.lrc || "");
+                    onClick={async () => {
+                      // 최신 lrc를 서버에서 다시 읽어 편집기에 반영 (빈 스탬프 등 최신 상태)
+                      try {
+                        const r = await fetch(`${BACKEND}/lyrics/${videoId}`);
+                        if (r.ok) {
+                          const j = await r.json();
+                          setLyricsEditText(j.lrc || "");
+                        } else {
+                          setLyricsEditText(lyrics.lrc || "");
+                        }
+                      } catch {
+                        setLyricsEditText(lyrics.lrc || "");
+                      }
                       setLyricsOpen(true);
                       setLyricsMode("edit");
                     }}

@@ -1045,6 +1045,7 @@ from lyrics_store import (
     lyrics_path,
     lrc_to_yaml,
 )
+from db import delete_preset_lyrics
 
 
 @app.get("/lyrics/{video_id}")
@@ -1087,8 +1088,48 @@ async def lyrics_put(video_id: str, payload: dict = Body(default={})):  # noqa: 
 async def lyrics_delete(video_id: str):
     if load_lrc(DATA_DIR, video_id) is None:
         raise HTTPException(status_code=404, detail="no lyrics saved")
-    os.remove(lyrics_path(DATA_DIR, video_id))
+    delete_preset_lyrics(DATA_DIR, video_id)
+    try:
+        os.remove(lyrics_path(DATA_DIR, video_id))  # 구버전 파일 잔존 시 제거
+    except FileNotFoundError:
+        pass
     return {"ok": True}
+
+
+@app.post("/lyrics/{video_id}/stamp")
+async def lyrics_stamp(video_id: str, payload: dict = Body(default={})):  # noqa: B008
+    """빈 스탬프 찍기 — 재생 중 현재 위치의 타임스탬프를 기록.
+
+    body: {position_sec: 83.4}  (프론트에서 현재 재생 위치 전달)
+    동작: 저장된 LRC에(없으면 새로 생성) `[mm:ss.xx]` 빈 줄을 시간순으로 추가.
+    나중에 편집기에서 해당 줄에 텍스트를 채워 넣는 수동 싱크 워크플로용.
+    """
+    pos = payload.get("position_sec")
+    if pos is None:
+        raise HTTPException(status_code=400, detail="position_sec required")
+    try:
+        t = max(0.0, float(pos))
+    except (TypeError, ValueError):
+        raise HTTPException(status_code=400, detail="position_sec must be a number")
+
+    text = load_lrc(DATA_DIR, video_id) or ""
+    parsed = parse_lrc(text)  # 메타(offset 등)와 기존 줄 모두 보존
+    parsed["lines"].append({"time": round(t, 3), "text": ""})
+    parsed["lines"].sort(key=lambda x: x["time"])
+
+    new_text = serialize_lrc(parsed["meta"], parsed["lines"])
+    save_lrc(DATA_DIR, video_id, new_text)
+    mm = int(t // 60)
+    ss = t - mm * 60
+    return {
+        "ok": True,
+        "stamp": f"[{mm:02d}:{ss:05.2f}]",
+        "total_lines": len(parsed["lines"]),
+        "empty_stamps": sum(1 for ln in parsed["lines"] if not ln["text"]),
+        "lines": parsed["lines"],
+        "offset_ms": int(parsed["meta"].get("offset", 0) or 0),
+        "lrc": new_text,
+    }
 
 
 @app.post("/lyrics/{video_id}/import")
