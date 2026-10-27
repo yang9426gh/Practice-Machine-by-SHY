@@ -1,0 +1,21 @@
+# Python
+__pycache__/
+*.py[cod]
+venv/
+.venv/
+data/
+*.db
+
+# Node / Next
+node_modules/
+.next/
+out/
+*.tsbuildinfo
+next-env.d.ts
+
+# Logs
+logs/
+*.log
+
+# OS
+.DS_Store
