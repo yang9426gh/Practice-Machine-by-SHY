@@ -1820,7 +1820,8 @@ export default function KaraokePage() {
   };
 
   // ---------- Queue 인디케이터 (메인 화면용 — 백그라운드 폴링, 재생과 독립) ----------
-  const [queueActive, setQueueActive] = useState<{ count: number; label: string }>({ count: 0, label: "" });
+  // 전체 큐 진행률: (완료곡수 + 실행중곡 진행%) / 전체 대상곡수
+  const [queueActive, setQueueActive] = useState<{ count: number; label: string; pct: number }>({ count: 0, label: "", pct: 0 });
   useEffect(() => {
     let alive = true;
     const tick = async () => {
@@ -1831,12 +1832,20 @@ export default function KaraokePage() {
         const items = (j.items || []) as Array<{ status: string; name: string | null; video_id: string; progress: number }>;
         const active = items.filter((q) => !["completed", "error"].includes(q.status));
         const running = active.find((q) => q.status !== "queued");
+        // 전체 진행률 = (완료된 곡 수 + 현재 곡 진행률) / (전체 활성 곡 수)
+        const total = active.length;
+        const allItems = items as Array<{ status: string; progress: number }>;
+        const doneTotal = allItems.filter((q) => q.status === "completed").length;
+        const currentProg = running ? (running.progress || 0) / 100 : 0;
+        const denom = total + doneTotal;
+        const pct = denom > 0 ? Math.round(((doneTotal + currentProg) / denom) * 100) : 0;
         setQueueActive({
-          count: active.length,
+          count: total,
+          pct,
           label: running
-            ? `${running.name || running.video_id} ${running.status === "separating" ? "분리" : "다운로드"} ${running.progress}%${active.length > 1 ? ` +${active.length - 1}` : ""}`
-            : active.length > 0
-            ? `대기 ${active.length}곡`
+            ? `${running.name || running.video_id} ${running.status === "separating" ? "분리" : "다운로드"} ${running.progress}%${total > 1 ? ` +${total - 1}` : ""}`
+            : total > 0
+            ? `대기 ${total}곡`
             : "",
         });
       } catch {}
@@ -1855,21 +1864,27 @@ export default function KaraokePage() {
         <div className="flex gap-2 items-center">
           {/* URL 로드는 라이브러리 메뉴에서 큐로 이동 — 재생 컨트롤만 상단에 */}
 
-          {/* 큐 인디케이터 — 백그라운드 작업 중일 때만 표시, 클릭 시 /library로 */}
+          {/* 큐 인디케이터 — 백그라운드 작업 중일 때만 표시, 하단 프로그레스 바가 전체 진행률을 채움 */}
           {queueActive.count > 0 ? (
             <button
               onClick={async () => {
                 await unloadAudio();
                 router.push("/library");
               }}
-              className="flex items-center gap-2 px-3 py-2 rounded-lg border border-blue-800/60 bg-blue-950/30 text-blue-200 text-xs"
-              title="큐 작업 진행 중 — 클릭해서 라이브러리 열기"
+              className="relative flex items-center gap-2 px-3 py-2 rounded-lg border border-blue-800/60 bg-blue-950/30 text-blue-200 text-xs overflow-hidden"
+              title={`전체 진행률 ${queueActive.pct}% — 클릭해서 라이브러리 열기`}
             >
-              <span className="relative flex h-2 w-2">
+              {/* 배경 프로그레스 채움 */}
+              <span
+                className="absolute inset-y-0 left-0 bg-blue-600/25 transition-all duration-700 ease-out"
+                style={{ width: `${queueActive.pct}%` }}
+              />
+              <span className="relative flex h-2 w-2 shrink-0">
                 <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-blue-400 opacity-75"></span>
                 <span className="relative inline-flex rounded-full h-2 w-2 bg-blue-500"></span>
               </span>
-              <span className="truncate max-w-[220px]">{queueActive.label}</span>
+              <span className="relative truncate max-w-[220px]">{queueActive.label}</span>
+              <span className="relative tabular-nums text-blue-300/80">{queueActive.pct}%</span>
             </button>
           ) : null}
 
