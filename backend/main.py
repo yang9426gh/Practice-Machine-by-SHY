@@ -11,6 +11,7 @@ import shutil
 import hashlib
 import threading
 import traceback
+from typing import Optional
 from processor import download_youtube_audio, download_youtube_video, separate_stems
 from ytmusicapi import YTMusic
 
@@ -1031,7 +1032,8 @@ async def export_mix(task_id: str, payload: dict = Body(default={})):  # noqa: B
         "focusVol": 100,
         "otherInstVol": 100,
         "vocalsVol": 100,
-        "instrumentsVol": 100
+        "instrumentsVol": 100,
+        "semitones": 0            # 적용중이면 transposed stems로 믹스 (선택)
       }
     """
     out_dir, _v, _m, _video = output_paths(task_id)
@@ -1039,50 +1041,19 @@ async def export_mix(task_id: str, payload: dict = Body(default={})):  # noqa: B
     if not stems:
         raise HTTPException(status_code=404, detail="Stems not ready")
 
+    # transpose 적용 중이면 transposed stems 사용 (Export가 화면과 동일한 키로 나가도록)
+    try:
+        semitones = int(payload.get("semitones", 0) or 0)
+    except (TypeError, ValueError):
+        semitones = 0
+    if semitones:
+        stems = resolve_export_stems(task_id, semitones)
+
     mode = payload.get("mode") or {"kind": "master"}
     kind = str(mode.get("kind") or "master")
     instrument = str(mode.get("instrument") or "")
 
-    master = float(payload.get("masterVolume", 100)) / 100.0
-    master = max(0.0, min(1.0, master))
-
-    # Compute per-stem linear gains
-    gains: dict[str, float] = {}
-
-    if kind == "master":
-        inst_master = float(payload.get("instrumentalMaster", 100)) / 100.0
-        inst_master = max(0.0, min(1.0, inst_master))
-        stem_vols = payload.get("stemVolumes") or {}
-        for nm in stems.keys():
-            sv = float(stem_vols.get(nm, 100)) / 100.0
-            sv = max(0.0, min(1.0, sv))
-            if nm == "vocals":
-                gains[nm] = master * sv
-            else:
-                gains[nm] = master * inst_master * sv
-
-    elif kind == "vocal":
-        vocals_vol = max(0.0, min(1.0, float(payload.get("vocalsVol", 100)) / 100.0))
-        inst_vol = max(0.0, min(1.0, float(payload.get("instrumentsVol", 100)) / 100.0))
-        for nm in stems.keys():
-            if nm == "vocals":
-                gains[nm] = master * vocals_vol
-            else:
-                gains[nm] = master * inst_vol
-
-    elif kind == "instrument":
-        focus_vol = max(0.0, min(1.0, float(payload.get("focusVol", 100)) / 100.0))
-        other_vol = max(0.0, min(1.0, float(payload.get("otherInstVol", 100)) / 100.0))
-        vocals_vol = max(0.0, min(1.0, float(payload.get("vocalsVol", 100)) / 100.0))
-        for nm in stems.keys():
-            if nm == "vocals":
-                gains[nm] = master * vocals_vol
-            elif instrument and nm == instrument:
-                gains[nm] = master * focus_vol
-            else:
-                gains[nm] = master * other_vol
-    else:
-        raise HTTPException(status_code=400, detail="Invalid mode")
+    gains = compute_gains(payload, list(stems.keys()))
 
     # Output path (stable for same mode)
     safe_kind = kind.replace("/", "_")
@@ -1101,6 +1072,226 @@ async def export_mix(task_id: str, payload: dict = Body(default={})):  # noqa: B
         raise HTTPException(status_code=500, detail=f"export failed: {e}")
 
     return {"ok": True, "mp3": f"/audio/{task_id}/exports/mix_{tag}.mp3"}
+
+
+# -----------------------------
+# Export Video — 영상 + 믹스 오디오 + 코드/가사 자막 번인 (백그라운드 작업 + 진행률 폴링)
+# -----------------------------
+_video_export_jobs: dict[str, dict] = {}
+
+
+def compute_gains(payload: dict, stem_names: list[str]) -> dict[str, float]:
+    """Export MP3 / Export Video 공통 — 믹스 페이로드 → 스템별 linear gain."""
+    mode = payload.get("mode") or {"kind": "master"}
+    kind = str(mode.get("kind") or "master")
+    instrument = str(mode.get("instrument") or "")
+
+    master = float(payload.get("masterVolume", 100)) / 100.0
+    master = max(0.0, min(1.0, master))
+
+    gains: dict[str, float] = {}
+
+    if kind == "master":
+        inst_master = float(payload.get("instrumentalMaster", 100)) / 100.0
+        inst_master = max(0.0, min(1.0, inst_master))
+        stem_vols = payload.get("stemVolumes") or {}
+        for nm in stem_names:
+            sv = float(stem_vols.get(nm, 100)) / 100.0
+            sv = max(0.0, min(1.0, sv))
+            if nm == "vocals":
+                gains[nm] = master * sv
+            else:
+                gains[nm] = master * inst_master * sv
+
+    elif kind == "vocal":
+        vocals_vol = max(0.0, min(1.0, float(payload.get("vocalsVol", 100)) / 100.0))
+        inst_vol = max(0.0, min(1.0, float(payload.get("instrumentsVol", 100)) / 100.0))
+        for nm in stem_names:
+            if nm == "vocals":
+                gains[nm] = master * vocals_vol
+            else:
+                gains[nm] = master * inst_vol
+
+    elif kind == "instrument":
+        focus_vol = max(0.0, min(1.0, float(payload.get("focusVol", 100)) / 100.0))
+        other_vol = max(0.0, min(1.0, float(payload.get("otherInstVol", 100)) / 100.0))
+        vocals_vol = max(0.0, min(1.0, float(payload.get("vocalsVol", 100)) / 100.0))
+        for nm in stem_names:
+            if nm == "vocals":
+                gains[nm] = master * vocals_vol
+            elif instrument and nm == instrument:
+                gains[nm] = master * focus_vol
+            else:
+                gains[nm] = master * other_vol
+    else:
+        raise HTTPException(status_code=400, detail="Invalid mode")
+
+    return gains
+
+
+def resolve_export_stems(task_id: str, semitones: int) -> dict[str, str]:
+    """transpose 적용 상태의 stems 경로 반환 (transpose_{+n}/ 폴더, drums는 원본 유지)."""
+    out_dir, _v, _m, _video = output_paths(task_id)
+    base = find_stems(out_dir)
+    if not base:
+        raise HTTPException(status_code=404, detail="Stems not ready")
+    if semitones == 0:
+        return base
+
+    tr_dir = transposed_stems_dir(task_id, semitones)
+    resolved: dict[str, str] = {}
+    missing: list[str] = []
+    for name, src in base.items():
+        if name == "drums":
+            resolved[name] = src  # 드럼은 무피치 — 원본 유지 (transpose_stems와 동일)
+            continue
+        dst = os.path.join(tr_dir, f"{name}{os.path.splitext(src)[1]}")
+        if os.path.exists(dst) and os.path.getsize(dst) > 1024:
+            resolved[name] = dst
+        else:
+            missing.append(name)
+    if missing:
+        raise HTTPException(
+            status_code=409,
+            detail=f"Transposed stems not ready: {', '.join(missing)}. Apply transpose first.",
+        )
+    return resolved
+
+
+def _video_id_for_task(task_id: str) -> Optional[str]:
+    """task_id(=sha1(video_id)[:16]) → video_id 역탐색 (presets.source_url 기반)."""
+    try:
+        for p in list_presets(DATA_DIR, limit=500):
+            url = str(p.get("source_url") or "")
+            if not url:
+                continue
+            vid = video_id_from_url(url) or url.strip()
+            if hashlib.sha1(vid.encode("utf-8")).hexdigest()[:16] == task_id:
+                return str(p.get("id") or vid)
+    except Exception:
+        pass
+    return None
+
+
+def _run_video_export_job(task_id: str, payload: dict) -> None:
+    job = _video_export_jobs[task_id]
+    try:
+        from export_video import build_ass, export_video, probe_video
+
+        video_file = os.path.join(DATA_DIR, task_id, "video.mp4")
+        if not os.path.exists(video_file):
+            raise RuntimeError("Video file not found for this track")
+
+        # stems (transpose 반영)
+        stems = resolve_export_stems(task_id, int(payload.get("semitones", 0) or 0))
+        gains = compute_gains(payload, list(stems.keys()))
+
+        # 가사/코드 (저장된 것; 없으면 각각 생략)
+        chord_lines: list[dict] = []
+        lyric_lines: list[dict] = []
+        vid = _video_id_for_task(task_id)
+        if vid:
+            try:
+                text = load_lrc(DATA_DIR, vid)
+                if text:
+                    parsed = parse_lrc(text)
+                    off = int(parsed["meta"].get("offset", 0) or 0) / 1000.0
+                    lyric_lines = [
+                        {"time": float(ln["time"]) + off, "text": ln.get("text", "")}
+                        for ln in (parsed.get("lines") or [])
+                    ]
+            except Exception:
+                lyric_lines = []
+            try:
+                text = load_chords(DATA_DIR, vid)
+                if text:
+                    parsed = parse_chords(text)
+                    off = int(parsed["meta"].get("offset", 0) or 0) / 1000.0
+                    chord_lines = [
+                        {
+                            "time": float(ln["time"]) + off,
+                            "chords": [
+                                {"time": float(ev["time"]) + off, "text": ev.get("text", "")}
+                                for ev in (ln.get("chords") or [])
+                            ],
+                        }
+                        for ln in (parsed.get("lines") or [])
+                    ]
+            except Exception:
+                chord_lines = []
+
+        if not chord_lines and not lyric_lines:
+            raise RuntimeError("No lyrics/chords saved — nothing to overlay")
+
+        w, h, dur = probe_video(video_file)
+        chord_shift = int(payload.get("semitones", 0) or 0) + int(payload.get("key_adj", 0) or 0)
+        ass_text = build_ass(
+            width=w,
+            height=h,
+            chord_lines=chord_lines,
+            lyric_lines=lyric_lines,
+            chord_shift=chord_shift,
+        )
+
+        export_dir = os.path.join(DATA_DIR, task_id, "exports")
+        os.makedirs(export_dir, exist_ok=True)
+        ass_path = os.path.join(export_dir, "overlay.ass")
+        with open(ass_path, "w", encoding="utf-8") as f:
+            f.write(ass_text)
+
+        job["stage"] = "encoding"
+        out_mp4 = os.path.join(export_dir, "video_mix.mp4")
+
+        def _prog(pct: int):
+            job["pct"] = int(pct)
+
+        export_video(
+            video_path=video_file,
+            stems=stems,
+            gains=gains,
+            ass_path=ass_path,
+            out_path=out_mp4,
+            duration_hint=dur,
+            progress_cb=_prog,
+        )
+
+        job["pct"] = 100
+        job["stage"] = "done"
+        job["out"] = f"/audio/{task_id}/exports/video_mix.mp4"
+    except HTTPException as e:
+        job["stage"] = "error"
+        job["error"] = str(e.detail)
+    except Exception as e:
+        job["stage"] = "error"
+        job["error"] = f"{e}"
+
+
+@app.post("/export/video/{task_id}")
+async def export_video_start(task_id: str, payload: dict = Body(default={})):  # noqa: B008
+    """Export Video 시작 (백그라운드). payload: Export MP3와 동일한 믹스 설정 + semitones + key_adj.
+    진행률은 GET /export/video/{task_id}/status 로 폴링."""
+    out_dir, _v, _m, video_file = output_paths(task_id)
+    if not os.path.exists(video_file):
+        raise HTTPException(status_code=404, detail="Video not available for this track")
+    if not find_stems(out_dir):
+        raise HTTPException(status_code=404, detail="Stems not ready")
+
+    cur = _video_export_jobs.get(task_id)
+    if cur and cur.get("stage") not in ("done", "error", None):
+        raise HTTPException(status_code=409, detail="Video export already running")
+
+    _video_export_jobs[task_id] = {"stage": "mixing", "pct": 0, "error": None, "out": None}
+    thread = threading.Thread(target=_run_video_export_job, args=(task_id, dict(payload or {})), daemon=True)
+    thread.start()
+    return {"ok": True, "task_id": task_id}
+
+
+@app.get("/export/video/{task_id}/status")
+async def export_video_status(task_id: str):
+    job = _video_export_jobs.get(task_id)
+    if job is None:
+        raise HTTPException(status_code=404, detail="no video export job")
+    return job
 
 
 @app.delete("/presets/{preset_id}")

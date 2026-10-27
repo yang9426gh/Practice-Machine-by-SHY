@@ -1819,6 +1819,64 @@ export default function KaraokePage() {
     }
   };
 
+  // ---------- Export Video (영상 + 믹스 오디오 + 코드/가사 자막 번인) ----------
+  const [videoExportPct, setVideoExportPct] = useState<number | null>(null); // null = idle
+
+  const exportVideo = async () => {
+    if (!taskId || videoExportPct != null) return;
+    try {
+      const resp = await fetch(`${BACKEND}/export/video/${taskId}`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          mode: mixMode,
+          masterVolume,
+          stemVolumes,
+          focusVol,
+          otherInstVol,
+          vocalsVol,
+          instrumentsVol,
+          semitones,
+          key_adj: keyAdj,
+        }),
+      });
+      const j = await resp.json();
+      if (!resp.ok) throw new Error(j?.detail || "export failed");
+
+      setVideoExportPct(0);
+      for (;;) {
+        await new Promise((r) => setTimeout(r, 700));
+        const sr = await fetch(`${BACKEND}/export/video/${taskId}/status`);
+        const sj = await sr.json();
+        if (!sr.ok) throw new Error(sj?.detail || "status failed");
+        if (sj.stage === "error") throw new Error(sj.error || "export failed");
+        setVideoExportPct(Math.max(1, Number(sj.pct) || 0));
+        if (sj.stage === "done") {
+          const url = `${BACKEND}${sj.out}`;
+          const fname = `video_${videoId || taskId}.mp4`;
+          // @ts-ignore
+          const holy = (globalThis as any).holy;
+          if (holy?.saveFile) {
+            await holy.saveFile(url, fname);
+          } else {
+            const a = document.createElement("a");
+            a.href = url;
+            a.download = fname;
+            document.body.appendChild(a);
+            a.click();
+            a.remove();
+          }
+          toast("Exported video (check Downloads)");
+          return;
+        }
+      }
+    } catch (e: any) {
+      toast(`Export video failed: ${String(e?.message || e)}`);
+    } finally {
+      setVideoExportPct(null);
+    }
+  };
+
   // ---------- Fullscreen mode (영상 영역 전체화면 + 코드/가사 오버레이) ----------
   const [fsMode, setFsMode] = useState(false);
 
@@ -1947,6 +2005,14 @@ export default function KaraokePage() {
             className={`px-3 py-2 rounded-lg border text-sm ${status === "completed" ? "border-zinc-700 hover:bg-zinc-900" : "border-zinc-800 text-zinc-600 cursor-not-allowed"}`}
           >
             Export MP3
+          </button>
+          <button
+            onClick={exportVideo}
+            disabled={status !== "completed" || !videoUrl || videoExportPct != null}
+            className={`px-3 py-2 rounded-lg border text-sm ${status === "completed" && videoUrl && videoExportPct == null ? "border-zinc-700 hover:bg-zinc-900" : "border-zinc-800 text-zinc-600 cursor-not-allowed"}`}
+            title="영상 + 믹스 오디오 + 코드/가사 자막 번인 mp4"
+          >
+            {videoExportPct != null ? `Encoding ${videoExportPct}%` : "Export Video"}
           </button>
         </div>
       </div>

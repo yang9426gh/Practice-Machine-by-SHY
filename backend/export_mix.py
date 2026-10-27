@@ -9,14 +9,12 @@ def _ffmpeg() -> str:
     return ffmpeg_bin()
 
 
-def mixdown_to_mp3(stems: Dict[str, str], gains: Dict[str, float], out_mp3: str, *, bitrate: str = "320k") -> str:
-    """Mix stems (wav) into a single mp3 using ffmpeg.
+def build_mix_args(stems: Dict[str, str], gains: Dict[str, float]) -> Tuple[List[str], str, str]:
+    """Build ffmpeg inputs + filter_complex for mixing stems.
 
-    stems: {stem_name: wav_path}
-    gains: {stem_name: linear_gain} (missing => 1.0)
+    Returns (input_args, filter_complex, audio_out_label).
+    Shared by Export MP3 (file output) and Export Video (mux into video).
     """
-    os.makedirs(os.path.dirname(out_mp3), exist_ok=True)
-
     # Keep a stable ordering
     names = sorted(stems.keys())
     inputs: List[str] = []
@@ -36,6 +34,18 @@ def mixdown_to_mp3(stems: Dict[str, str], gains: Dict[str, float], out_mp3: str,
 
     amix = "".join(labels) + f"amix=inputs={len(labels)}:normalize=0[aout]"
     fc = ";".join(parts + [amix])
+    return inputs, fc, "[aout]"
+
+
+def mixdown_to_mp3(stems: Dict[str, str], gains: Dict[str, float], out_mp3: str, *, bitrate: str = "320k") -> str:
+    """Mix stems (wav) into a single mp3 using ffmpeg.
+
+    stems: {stem_name: wav_path}
+    gains: {stem_name: linear_gain} (missing => 1.0)
+    """
+    os.makedirs(os.path.dirname(out_mp3), exist_ok=True)
+
+    inputs, fc, aout = build_mix_args(stems, gains)
 
     cmd = [
         _ffmpeg(),
@@ -44,7 +54,7 @@ def mixdown_to_mp3(stems: Dict[str, str], gains: Dict[str, float], out_mp3: str,
         "-filter_complex",
         fc,
         "-map",
-        "[aout]",
+        aout,
         "-c:a",
         "libmp3lame",
         "-b:a",
