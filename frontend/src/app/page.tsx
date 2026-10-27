@@ -408,7 +408,9 @@ export default function KaraokePage() {
     }
   };
 
-  // 코드용 스탬프: 커서 위치에 [시각] 삽입 — 줄바꿈 없이 인라인 (연타로 같은 줄에 여러 코드)
+  // 코드용 스탬프: 커서 위치에 [시각] 삽입 — 줄바꿈 없이 인라인.
+  // 빈 스탬프 연타 허용: 바로 앞이 "빈 스탬프+공백"이어도 교체하지 않고 새 스탬프를 추가한다
+  // (시간 먼저 여러 개 찍어두고 나중에 코드 채우기 워크플로).
   const stampChordAtCursor = () => {
     const el = document.getElementById("chords-edit-area") as HTMLTextAreaElement | null;
     const t = Math.max(0, currentPositionLive());
@@ -424,8 +426,9 @@ export default function KaraokePage() {
     const text = chordsText;
     const before = text.slice(0, start);
     const after = text.slice(end);
-    // 바로 앞이 스탬프만 있으면 재찍기(교체) — 밀린 스탬프 정리용
-    const m = before.match(/\[\d{1,3}:\d{1,2}(?:[.:]\d{1,3})?\]\s*$/);
+    // 바로 앞이 "코드가 붙은 스탬프"면 재찍기(교체) — 잘못 찍은 스탬프 정리용.
+    // 빈 스탬프(뒤에 코드 없이 공백/줄끝)면 그대로 두고 새 스탬프 추가.
+    const m = before.match(/\[\d{1,3}:\d{1,2}(?:[.:]\d{1,3})?\][^\s\[]*$/);
     let newText: string;
     let caret: number;
     if (m) {
@@ -438,6 +441,23 @@ export default function KaraokePage() {
       newText = before + pad + stamp + " " + after;
       caret = start + pad.length + stamp.length + 1;
     }
+    setChordsText(newText);
+    requestAnimationFrame(() => {
+      el.focus();
+      el.setSelectionRange(caret, caret);
+    });
+  };
+
+  // 코드 편집창 줄바꿈 버튼 — 커서 위치에서 엔터와 동일
+  const newlineInChordsEditor = () => {
+    const el = document.getElementById("chords-edit-area") as HTMLTextAreaElement | null;
+    if (!el) return;
+    const start = el.selectionStart ?? chordsText.length;
+    const end = el.selectionEnd ?? start;
+    const before = chordsText.slice(0, start);
+    const after = chordsText.slice(end);
+    const newText = `${before}\n${after}`;
+    const caret = start + 1;
     setChordsText(newText);
     requestAnimationFrame(() => {
       el.focus();
@@ -2728,9 +2748,16 @@ export default function KaraokePage() {
               <button
                 onClick={stampChordAtCursor}
                 className="px-2 py-1 rounded-md border border-emerald-700 text-emerald-200 text-xs hover:bg-emerald-950/30"
-                title="텍스트 커서 위치에 현재 재생 시간의 타임스탬프 삽입 (인라인 — 연타로 같은 줄에 여러 코드)"
+                title="텍스트 커서 위치에 현재 재생 시간의 타임스탬프 삽입 (빈 스탬프 연타 가능 — 나중에 코드 채우기)"
               >
                 ⏱ 스탬프
+              </button>
+              <button
+                onClick={newlineInChordsEditor}
+                className="px-2 py-1 rounded-md border border-zinc-700 text-zinc-200 text-xs hover:bg-zinc-800"
+                title="커서 위치에서 줄바꿈 (엔터와 동일)"
+              >
+                ↵ 줄바꿈
               </button>
             </div>
             <div className="flex gap-2">
