@@ -259,9 +259,6 @@ export default function KaraokePage() {
 
   // Jobs UI removed
 
-  const [libraryOpen, setLibraryOpen] = useState(false);
-  const [presets, setPresets] = useState<Preset[]>([]);
-  const [presetName, setPresetName] = useState("");
 
   const [toastMsg, setToastMsg] = useState<string>("");
   const toastTimerRef = useRef<any>(null);
@@ -1515,15 +1512,6 @@ export default function KaraokePage() {
 
   // refreshJobs removed
 
-  const refreshPresets = async () => {
-    try {
-      const r = await fetch(`${BACKEND}/presets`);
-      const j = await r.json();
-      setPresets(j.items || []);
-    } catch {
-      setPresets([]);
-    }
-  };
 
   // Jobs polling removed
 
@@ -1831,136 +1819,7 @@ export default function KaraokePage() {
     }
   };
 
-  const savePreset = async () => {
-    const vid = extractYouTubeId(url) || videoId;
-    if (!vid) return;
 
-    const name = presetName || nowTitle || vid;
-    await fetch(`${BACKEND}/presets`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        id: vid,
-        name,
-        source_url: url || `https://www.youtube.com/watch?v=${vid}`,
-        video_id: vid,
-        title: nowTitle || null,
-        thumbnail_url: nowThumb || null,
-        // Save current should persist BPM/Key explicitly.
-        bpm: bpm ? Number(bpm) : null,
-        key_tonic: keyTonic || null,
-        key_mode: keyMode || null,
-        semitones: 0,
-        master_volume: masterVolume / 100,
-        vocal_volume: 1.0,
-      }),
-    });
-    setPresetName("");
-    await refreshPresets();
-  };
-
-  const loadPreset = async (p: Preset) => {
-    setLibraryOpen(false);
-    setBpm(p.bpm != null ? String(p.bpm) : "");
-    if (p.key_tonic) setKeyTonic(String(p.key_tonic));
-    if (p.key_mode) setKeyMode(String(p.key_mode) === "minor" ? "minor" : "major");
-    await loadFromUrl(p.source_url || `https://www.youtube.com/watch?v=${p.video_id}`);
-  };
-
-  // refresh presets when library opened
-  useEffect(() => {
-    if (!libraryOpen) return;
-    refreshPresets();
-  }, [libraryOpen]);
-
-  // ---------- Queue (라이브러리 백그라운드 처리) ----------
-  type QueueItem = {
-    video_id: string;
-    url: string;
-    task_id: string;
-    name: string | null;
-    thumbnail_url: string | null;
-    status: string; // queued | downloading | separating | processing | completed | error
-    stage: string;
-    progress: number;
-    error: string | null;
-  };
-  const [queueItems, setQueueItems] = useState<QueueItem[]>([]);
-  const [queueUrl, setQueueUrl] = useState("");
-  const [queueBusy, setQueueBusy] = useState(false);
-
-  const extractId = (u: string): string => {
-    const m = u.match(/(?:v=|youtu\.be\/|shorts\/|embed\/)([A-Za-z0-9_-]{11})/);
-    return m ? m[1] : /^[A-Za-z0-9_-]{11}$/.test(u.trim()) ? u.trim() : "";
-  };
-
-  const refreshQueue = async () => {
-    try {
-      const r = await fetch(`${BACKEND}/queue`);
-      if (r.ok) {
-        const j = await r.json();
-        setQueueItems(j.items || []);
-      }
-    } catch {}
-  };
-
-  // 큐 폴링: 활성 작업 있을 때만 1초 간격 (재생과 독립)
-  useEffect(() => {
-    refreshQueue(); // 마운트 시 1회 동기화
-    const active = queueItems.some((q) => !["completed", "error"].includes(q.status));
-    if (!active && !libraryOpen) return;
-    const iv = setInterval(refreshQueue, active ? 1000 : 4000);
-    return () => clearInterval(iv);
-  }, [queueItems, libraryOpen]);
-
-  // 큐 완료 → 프리셋 목록 갱신 (라이브러리에 즉시 반영)
-  const prevActiveRef = useRef(false);
-  useEffect(() => {
-    const active = queueItems.some((q) => !["completed", "error"].includes(q.status));
-    if (prevActiveRef.current && !active) refreshPresets();
-    prevActiveRef.current = active;
-  }, [queueItems]);
-
-  const addToQueue = async () => {
-    const id = extractId(queueUrl);
-    if (!id) {
-      toast("Invalid YouTube URL");
-      return;
-    }
-    setQueueBusy(true);
-    try {
-      // 썸네일은 클라이언트에서 미리 확보 (큐 카드용)
-      const thumb = `https://i.ytimg.com/vi/${id}/mqdefault.jpg`;
-      const r = await fetch(
-        `${BACKEND}/queue?url=${encodeURIComponent(`https://www.youtube.com/watch?v=${id}`)}&thumbnail_url=${encodeURIComponent(thumb)}`,
-        { method: "POST" }
-      );
-      const j = await r.json();
-      if (!r.ok) {
-        toast(j?.detail === "Queue is full (max 5)" ? "큐 가득 참 (최대 5개)" : "추가 실패");
-      } else if (j.status === "completed") {
-        toast("이미 준비된 곡입니다 — 라이브러리에서 재생");
-      } else if (j.status === "already_queued") {
-        toast("이미 큐에 있습니다");
-      } else {
-        toast("큐에 추가됨");
-        setQueueUrl("");
-      }
-      await refreshQueue();
-    } catch {
-      toast("추가 실패 — 서버 확인");
-    } finally {
-      setQueueBusy(false);
-    }
-  };
-
-  const removeFromQueue = async (vid: string) => {
-    await fetch(`${BACKEND}/queue/${vid}`, { method: "DELETE" });
-    await refreshQueue();
-  };
-
-  const queueProgress = (q: QueueItem) =>
-    q.status === "completed" ? 100 : Math.max(2, Math.min(99, q.progress || 0));
 
 
   return (
@@ -1970,7 +1829,10 @@ export default function KaraokePage() {
           {/* URL 로드는 라이브러리 메뉴에서 큐로 이동 — 재생 컨트롤만 상단에 */}
 
           <button
-            onClick={() => setLibraryOpen((o) => !o)}
+            onClick={async () => {
+              await unloadAudio();
+              router.push("/library");
+            }}
             className="px-3 py-2 rounded-lg border border-zinc-700 text-sm"
           >
             Library
@@ -2563,160 +2425,6 @@ export default function KaraokePage() {
             </>
           ) : null}
 
-          {/* Library */}
-          {libraryOpen ? (
-            <div className="mt-4 rounded-2xl border border-zinc-800 bg-zinc-950/70 p-4">
-              {/* URL → 백그라운드 큐 추가 */}
-              <div className="flex items-center gap-2">
-                <input
-                  className="flex-1 bg-zinc-900 border border-zinc-700 rounded-lg px-3 py-2 text-sm"
-                  placeholder="YouTube URL 붙여넣기 → 큐에 추가"
-                  value={queueUrl}
-                  onChange={(e) => setQueueUrl(e.target.value)}
-                  onKeyDown={(e) => {
-                    if (e.key === "Enter") addToQueue();
-                  }}
-                />
-                <button
-                  onClick={addToQueue}
-                  disabled={queueBusy}
-                  className="px-3 py-2 rounded-lg border border-zinc-700 text-sm disabled:opacity-50"
-                >
-                  {queueBusy ? "…" : "Queue"}
-                </button>
-              </div>
-
-              {/* 진행 중 큐 목록 (썸네일 + 원형 progress) */}
-              {queueItems.some((q) => q.status !== "completed") ? (
-                <div className="mt-3 space-y-2 max-h-[180px] overflow-auto pr-1">
-                  {queueItems
-                    .filter((q) => q.status !== "completed")
-                    .map((q) => {
-                      const pct = queueProgress(q);
-                      const isActive = !["queued", "error"].includes(q.status);
-                      return (
-                        <div key={q.video_id} className="flex items-center gap-3 rounded-xl border border-zinc-800 p-2">
-                          <div className="relative w-12 h-12 shrink-0">
-                            {q.thumbnail_url ? (
-                              // eslint-disable-next-line @next/next/no-img-element
-                              <img src={q.thumbnail_url} alt="" className="w-12 h-12 rounded-lg object-cover border border-zinc-800" />
-                            ) : (
-                              <div className="w-12 h-12 rounded-lg bg-zinc-900 border border-zinc-800" />
-                            )}
-                            {isActive ? (
-                              <svg className="absolute inset-0 -m-1" viewBox="0 0 56 56">
-                                <circle cx="28" cy="28" r="25" fill="none" stroke="rgba(255,255,255,0.12)" strokeWidth="4" />
-                                <circle
-                                  cx="28" cy="28" r="25" fill="none" stroke="#3b82f6" strokeWidth="4"
-                                  strokeLinecap="round"
-                                  strokeDasharray={2 * Math.PI * 25}
-                                  strokeDashoffset={2 * Math.PI * 25 * (1 - pct / 100)}
-                                  transform="rotate(-90 28 28)"
-                                  style={{ transition: "stroke-dashoffset 0.5s ease" }}
-                                />
-                              </svg>
-                            ) : null}
-                            <div className="absolute inset-0 flex items-center justify-center">
-                              <span className="text-[10px] font-semibold text-white bg-black/60 rounded px-1">
-                                {q.status === "error" ? "!" : `${pct}%`}
-                              </span>
-                            </div>
-                          </div>
-                          <div className="flex-1 min-w-0">
-                            <div className="text-sm text-zinc-200 truncate">
-                              {q.name || q.video_id}
-                            </div>
-                            <div className="text-[11px] text-zinc-500">
-                              {q.status === "error"
-                                ? `실패: ${q.error || ""}`
-                                : q.status === "queued"
-                                ? "대기 중"
-                                : q.status === "separating"
-                                ? "스템 분리 중…"
-                                : "다운로드 중…"}
-                            </div>
-                          </div>
-                          {q.status === "queued" ? (
-                            <button
-                              onClick={() => removeFromQueue(q.video_id)}
-                              className="text-[11px] px-2 py-1 rounded-md border border-zinc-800 text-zinc-400"
-                            >
-                              취소
-                            </button>
-                          ) : null}
-                        </div>
-                      );
-                    })}
-                </div>
-              ) : null}
-
-              <div className="mt-3 flex items-center gap-2">
-                <input
-                  className="flex-1 bg-zinc-900 border border-zinc-700 rounded-lg px-3 py-2 text-sm"
-                  placeholder="Preset name (optional)"
-                  value={presetName}
-                  onChange={(e) => setPresetName(e.target.value)}
-                />
-                <button onClick={savePreset} className="px-3 py-2 rounded-lg border border-zinc-700 text-sm">
-                  Save current
-                </button>
-              </div>
-
-              <div className="mt-3 space-y-2 max-h-[300px] overflow-auto pr-1">
-                {presets.map((p) => (
-                  <div key={p.id} className="flex items-start gap-3 rounded-xl border border-zinc-800 p-3">
-                    {p.thumbnail_url ? (
-                      // eslint-disable-next-line @next/next/no-img-element
-                      <img src={p.thumbnail_url} alt="thumb" className="w-12 h-12 rounded-lg object-cover border border-zinc-800" />
-                    ) : (
-                      <div className="w-12 h-12 rounded-lg bg-zinc-900 border border-zinc-800" />
-                    )}
-                    <button onClick={() => loadPreset(p)} className="flex-1 text-left">
-                      <div className="text-sm text-zinc-200">{p.name || p.title || p.video_id}</div>
-                      <div className="text-[11px] text-zinc-600 break-all">{p.source_url}</div>
-                    </button>
-                    <div className="flex gap-2">
-                      <button
-                        onClick={async () => {
-                          const nn = prompt("Rename preset", p.name || p.title || p.video_id);
-                          if (!nn) return;
-                          await fetch(`${BACKEND}/presets`, {
-                            method: "POST",
-                            headers: { "Content-Type": "application/json" },
-                            body: JSON.stringify({
-                              id: p.id,
-                              name: nn,
-                              source_url: p.source_url,
-                              video_id: p.video_id,
-                              title: p.title || null,
-                              thumbnail_url: p.thumbnail_url || null,
-                              semitones: 0,
-                              master_volume: 1,
-                              vocal_volume: 1,
-                            }),
-                          });
-                          await refreshPresets();
-                        }}
-                        className="text-[11px] px-2 py-1 rounded-md border border-zinc-800 text-zinc-300"
-                      >
-                        Rename
-                      </button>
-                      <button
-                        onClick={async () => {
-                          if (!confirm(`Delete: ${p.name || p.title || p.video_id}?`)) return;
-                          await fetch(`${BACKEND}/presets/${p.id}`, { method: "DELETE" });
-                          await refreshPresets();
-                        }}
-                        className="text-[11px] px-2 py-1 rounded-md border border-red-900/60 text-red-300"
-                      >
-                        Delete
-                      </button>
-                    </div>
-                  </div>
-                ))}
-              </div>
-            </div>
-          ) : null}
         </div>
       </div>
 
