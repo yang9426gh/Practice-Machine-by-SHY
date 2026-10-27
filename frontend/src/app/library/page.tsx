@@ -86,12 +86,18 @@ export default function LibraryPage() {
     return () => clearInterval(iv);
   }, [queueItems]);
 
-  // 활성 → 비활성 전환 시 프리셋 갱신 (새 곡이 라이브러리에 나타나게)
-  const prevActiveRef = useRef(false);
+  // 활성 곡 하나씩 완료될 때마다 프리셋 갱신 (완료 개수 변화 감지)
+  const prevDoneRef = useRef<number | null>(null);
   useEffect(() => {
-    const active = queueItems.some((q) => !["completed", "error"].includes(q.status));
-    if (prevActiveRef.current && !active) refresh();
-    prevActiveRef.current = active;
+    const done = queueItems.filter((q) => q.status === "completed").length;
+    if (prevDoneRef.current === null) {
+      prevDoneRef.current = done;
+      return;
+    }
+    if (done > prevDoneRef.current) {
+      refresh(); // 새 곡이 라이브러리에 자동 반영
+    }
+    prevDoneRef.current = done;
   }, [queueItems]);
 
   const extractId = (u: string): string => {

@@ -437,6 +437,7 @@ from queue_system import (  # noqa: E402
     queue_list,
     queue_remove,
     queue_clear_completed,
+    queue_update,
     MAX_QUEUE,
 )
 
@@ -485,7 +486,24 @@ async def post_queue(url: str = "", name: str = "", thumbnail_url: str = ""):
         if str(e) == "already_queued":
             return {"status": "already_queued", "video_id": vid, "queued": True}
         raise HTTPException(status_code=400, detail="Queue is full (max 5)")
+
+    # 타이틀/썸네일 비동기 수집 — 큐 카드에 곡명이 몇 초 안에 채워짐
+    threading.Thread(target=_fetch_queue_meta, args=(vid,), daemon=True).start()
     return {"status": "queued", "video_id": vid, "queued": True, "item": item}
+
+
+def _fetch_queue_meta(vid: str) -> None:
+    """YTM에서 곡명+썸네일를 가져와 큐 항목에 채움 (실패 무시 — video_id 표시 유지)."""
+    try:
+        wp = YTM.get_watch_playlist(vid)
+        if wp.get("tracks"):
+            t = wp["tracks"][0]
+            title = t.get("title")
+            thumbs = t.get("thumbnail") or []
+            thumb = sorted(thumbs, key=lambda x: (x.get("width", 0), x.get("height", 0)))[-1].get("url") if thumbs else None
+            queue_update(vid, name=title, thumbnail_url=thumb)
+    except Exception:
+        pass
 
 
 @app.delete("/queue/{video_id}")

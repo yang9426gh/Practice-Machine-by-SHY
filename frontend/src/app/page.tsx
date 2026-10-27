@@ -1819,14 +1819,59 @@ export default function KaraokePage() {
     }
   };
 
-
-
+  // ---------- Queue 인디케이터 (메인 화면용 — 백그라운드 폴링, 재생과 독립) ----------
+  const [queueActive, setQueueActive] = useState<{ count: number; label: string }>({ count: 0, label: "" });
+  useEffect(() => {
+    let alive = true;
+    const tick = async () => {
+      try {
+        const r = await fetch(`${BACKEND}/queue`);
+        if (!r.ok || !alive) return;
+        const j = await r.json();
+        const items = (j.items || []) as Array<{ status: string; name: string | null; video_id: string; progress: number }>;
+        const active = items.filter((q) => !["completed", "error"].includes(q.status));
+        const running = active.find((q) => q.status !== "queued");
+        setQueueActive({
+          count: active.length,
+          label: running
+            ? `${running.name || running.video_id} ${running.status === "separating" ? "분리" : "다운로드"} ${running.progress}%${active.length > 1 ? ` +${active.length - 1}` : ""}`
+            : active.length > 0
+            ? `대기 ${active.length}곡`
+            : "",
+        });
+      } catch {}
+    };
+    tick();
+    const iv = setInterval(tick, 3000);
+    return () => {
+      alive = false;
+      clearInterval(iv);
+    };
+  }, []);
 
   return (
     <main className="relative flex flex-col h-screen bg-black text-white overflow-hidden">
       <div className="p-4 border-b border-zinc-800 bg-zinc-950">
         <div className="flex gap-2 items-center">
           {/* URL 로드는 라이브러리 메뉴에서 큐로 이동 — 재생 컨트롤만 상단에 */}
+
+          {/* 큐 인디케이터 — 백그라운드 작업 중일 때만 표시, 클릭 시 /library로 */}
+          {queueActive.count > 0 ? (
+            <button
+              onClick={async () => {
+                await unloadAudio();
+                router.push("/library");
+              }}
+              className="flex items-center gap-2 px-3 py-2 rounded-lg border border-blue-800/60 bg-blue-950/30 text-blue-200 text-xs"
+              title="큐 작업 진행 중 — 클릭해서 라이브러리 열기"
+            >
+              <span className="relative flex h-2 w-2">
+                <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-blue-400 opacity-75"></span>
+                <span className="relative inline-flex rounded-full h-2 w-2 bg-blue-500"></span>
+              </span>
+              <span className="truncate max-w-[220px]">{queueActive.label}</span>
+            </button>
+          ) : null}
 
           <button
             onClick={async () => {
