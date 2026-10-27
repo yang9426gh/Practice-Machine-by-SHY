@@ -1803,8 +1803,8 @@ export default function KaraokePage() {
         </div>
       </div>
 
-      {/* Controls */}
-      <div className="p-6 bg-zinc-900/80 border-t border-zinc-800">
+      {/* Controls — 영상을 크게 키우면 남는 공간이 줄어드므로 내부 스크롤 허용 */}
+      <div className="p-6 bg-zinc-900/80 border-t border-zinc-800 min-h-0 overflow-y-auto overscroll-contain">
         {/* Start screen: choose instrument */}
         {mixMode.kind === "select" ? (
           <div className="max-w-3xl mx-auto">
