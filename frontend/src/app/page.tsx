@@ -2,7 +2,7 @@
 
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
-import { Play, Pause, ChevronUp, ChevronDown } from "lucide-react";
+import { Play, Pause, ChevronUp, ChevronDown, Maximize, Minimize } from "lucide-react";
 
 const BACKEND = process.env.NEXT_PUBLIC_BACKEND_URL || (typeof window !== "undefined" ? window.location.origin : "http://localhost:8011");
 
@@ -462,7 +462,7 @@ export default function KaraokePage() {
     });
   };
 
-  const videoAreaRef = useRef<HTMLDivElement | null>(null);
+  const videoWrapRef = useRef<HTMLDivElement | null>(null);
   const [videoH, setVideoH] = useState<number | null>(null);
   const [videoResizing, setVideoResizing] = useState(false);
   const videoResizeRef = useRef<{ startY: number; startH: number; dir: "top" | "bottom" } | null>(null);
@@ -493,7 +493,7 @@ export default function KaraokePage() {
   };
 
   const onVideoResizeDown = (dir: "top" | "bottom") => (e: React.PointerEvent<HTMLDivElement>) => {
-    const el = videoAreaRef.current;
+    const el = videoWrapRef.current;
     if (!el) return;
     videoResizeRef.current = { startY: e.clientY, startH: el.getBoundingClientRect().height, dir };
     e.currentTarget.setPointerCapture(e.pointerId);
@@ -1819,6 +1819,47 @@ export default function KaraokePage() {
     }
   };
 
+  // ---------- Fullscreen mode (영상 영역 전체화면 + 코드/가사 오버레이) ----------
+  const [fsMode, setFsMode] = useState(false);
+
+  const enterFs = async () => {
+    const el = videoWrapRef.current;
+    if (!el) return;
+    try {
+      if (el.requestFullscreen) {
+        await el.requestFullscreen();
+      } else if ((el as any).webkitRequestFullscreen) {
+        await (el as any).webkitRequestFullscreen();
+      }
+    } catch {}
+    setFsMode(true);
+  };
+
+  const exitFs = async () => {
+    try {
+      if (document.fullscreenElement) {
+        await document.exitFullscreen();
+      } else if ((document as any).webkitFullscreenElement && (document as any).webkitExitFullscreen) {
+        await (document as any).webkitExitFullscreen();
+      }
+    } catch {}
+    setFsMode(false);
+  };
+
+  // Esc/전체화면 해제 감지 (사용자가 Esc로 나가면 상태 동기화)
+  useEffect(() => {
+    const onChange = () => {
+      const active = !!document.fullscreenElement || !!(document as any).webkitFullscreenElement;
+      setFsMode(active);
+    };
+    document.addEventListener("fullscreenchange", onChange);
+    document.addEventListener("webkitfullscreenchange", onChange);
+    return () => {
+      document.removeEventListener("fullscreenchange", onChange);
+      document.removeEventListener("webkitfullscreenchange", onChange);
+    };
+  }, []);
+
   // ---------- Queue 인디케이터 (메인 화면용 — 백그라운드 폴링, 재생과 독립) ----------
   // 전체 큐 진행률: (완료곡수 + 실행중곡 진행%) / 전체 대상곡수
   const [queueActive, setQueueActive] = useState<{ count: number; label: string; pct: number }>({ count: 0, label: "", pct: 0 });
@@ -1984,16 +2025,18 @@ export default function KaraokePage() {
 
       {/* Video / status area (높이: 위/아래 핸들 드래그로 조절 가능) */}
       <div
-        ref={videoAreaRef}
-        className={`relative ${videoH == null ? "flex-1" : ""}`}
+        ref={videoWrapRef}
+        className={`relative ${videoH == null ? "flex-1" : ""} ${fsMode ? "bg-black" : ""}`}
         style={videoH != null ? { height: videoH, flex: "0 0 auto" } : undefined}
       >
         {videoUrl ? (
           <div className="absolute inset-0 bg-black">
             <video ref={videoRef} src={videoUrl} className="absolute inset-0 w-full h-full object-contain bg-black" playsInline muted />
-            <div className="absolute top-3 left-3 max-w-[75%] rounded-xl border border-zinc-800 bg-black/60 backdrop-blur px-3 py-2 text-white text-sm sm:text-base font-semibold shadow">
-              {nowTitle || videoId}
-            </div>
+            {!fsMode ? (
+              <div className="absolute top-3 left-3 max-w-[75%] rounded-xl border border-zinc-800 bg-black/60 backdrop-blur px-3 py-2 text-white text-sm sm:text-base font-semibold shadow">
+                {nowTitle || videoId}
+              </div>
+            ) : null}
           </div>
         ) : videoId ? (
           <div className="h-full w-full flex items-center justify-center bg-black">
@@ -2025,6 +2068,68 @@ export default function KaraokePage() {
           <div className="absolute left-1/2 -translate-x-1/2 top-4 rounded-full border border-zinc-800 bg-zinc-950/70 backdrop-blur px-4 py-2 shadow text-xs text-zinc-200">
             {toastMsg}
           </div>
+        ) : null}
+
+        {/* Fullscreen 오버레이 — 상단 1/3에 코드(위)+가사(아래) 나란히 표시 */}
+        {fsMode ? (
+          <div className="absolute inset-x-0 top-0 z-20 pointer-events-none">
+            <div className="h-[33vh] flex flex-col items-center justify-center gap-2 bg-gradient-to-b from-black/70 via-black/40 to-transparent px-8 pt-4">
+              {/* 코드 (위) */}
+              {chords && chordsShow && chordActiveIdx >= 0 ? (
+                <div className="text-center">
+                  <div className="flex flex-wrap justify-center items-baseline gap-x-8 text-4xl lg:text-5xl font-bold break-keep drop-shadow-lg">
+                    {chords.lines[chordActiveIdx].chords.map((c, ci) => (
+                      <span
+                        key={`${ci}-${c.time}`}
+                        className={
+                          ci === chordInLineIdx
+                            ? "text-white border-b-4 border-emerald-400"
+                            : ci < chordInLineIdx
+                              ? "text-zinc-300/80"
+                              : "text-zinc-500/70"
+                        }
+                      >
+                        {transposeChordText(c.text, semitones + keyAdj)}
+                      </span>
+                    ))}
+                  </div>
+                  {chordActiveIdx + 1 < chords.lines.length ? (
+                    <div className="text-xl lg:text-2xl text-zinc-400 mt-2 truncate">
+                      {chords.lines[chordActiveIdx + 1].chords.map((c, ci) => (
+                        <span key={ci}>{transposeChordText(c.text, semitones + keyAdj)}{"  "}</span>
+                      ))}
+                    </div>
+                  ) : null}
+                </div>
+              ) : null}
+              {/* 가사 (아래) */}
+              {lyrics && lyricsShow && lyricActiveIdx >= 0 ? (
+                <div className="text-center">
+                  <div className="text-2xl lg:text-3xl font-bold text-white break-keep drop-shadow-lg">
+                    {lyricLines[lyricActiveIdx].text}
+                  </div>
+                  {lyricActiveIdx + 1 < lyricLines.length ? (
+                    <div className="text-lg lg:text-xl text-zinc-400 mt-1 truncate">
+                      {lyricLines[lyricActiveIdx + 1].text}
+                    </div>
+                  ) : null}
+                </div>
+              ) : (!chords || !chordsShow) && (!lyrics || !lyricsShow) ? (
+                <div className="text-zinc-600 text-lg">♪</div>
+              ) : null}
+            </div>
+          </div>
+        ) : null}
+
+        {/* Fullscreen 토글 버튼 — 영상 영역 우측 하단 */}
+        {videoUrl || videoId ? (
+          <button
+            onClick={() => (fsMode ? exitFs() : enterFs())}
+            className="absolute bottom-3 right-3 z-30 p-2 rounded-lg border border-zinc-700 bg-black/60 backdrop-blur text-zinc-300 hover:text-white hover:bg-black/80 transition-colors"
+            title={fsMode ? "전체화면 종료 (Esc)" : "전체화면 — 코드·가사 오버레이"}
+          >
+            {fsMode ? <Minimize size={18} /> : <Maximize size={18} />}
+          </button>
         ) : null}
 
         {/* 위/아래 리사이즈 핸들 — 영상 영역 높이 조절 (더블클릭: 자동 높이 복귀) */}
