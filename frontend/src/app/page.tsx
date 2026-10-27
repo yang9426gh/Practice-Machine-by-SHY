@@ -1068,6 +1068,8 @@ export default function KaraokePage() {
   const [semitonesPending, setSemitonesPending] = useState(0);
   const [transposing, setTransposing] = useState(false);
   const [transposePct, setTransposePct] = useState<number>(0);
+  // 트랜스포즈 후 이어듣기용 — 마지막 위치/재생 상태 (로드 완료 시 소비 후 초기화)
+  const transposeResumeRef = useRef<{ pos: number; wasPlaying: boolean } | null>(null);
 
   const cacheKey = useMemo(() => {
     if (!videoId) return "";
@@ -1098,6 +1100,11 @@ export default function KaraokePage() {
   const applyTranspose = async (next: number) => {
     if (!taskId) return;
     if (status !== "completed") return;
+
+    // 트랜스포즈 후 현재 위치에서 이어듣기 — 위치/재생 상태를 먼저 저장
+    const resumePos = currentPosition();
+    const resumeWasPlaying = isPlayingRef.current;
+    transposeResumeRef.current = { pos: resumePos, wasPlaying: resumeWasPlaying };
 
     setTransposing(true);
     setTransposePct(0);
@@ -1405,6 +1412,10 @@ export default function KaraokePage() {
     const load = async () => {
       resetPlayer();
 
+      // 트랜스포즈 재적용에 의한 리로드면 이전 위치 복원 (새 곡 로드와 구분)
+      const resume = transposeResumeRef.current;
+      if (resume && isFinite(resume.pos) && resume.pos > 0) offsetRef.current = resume.pos;
+
       const cached = decodedStemCache.get(cacheKey);
       if (cached) {
         buffersRef.current = cached;
@@ -1421,6 +1432,10 @@ export default function KaraokePage() {
           }
           return m;
         });
+        if (resume?.wasPlaying) {
+          transposeResumeRef.current = null;
+          void playAudio();
+        }
         return;
       }
 
@@ -1468,7 +1483,11 @@ export default function KaraokePage() {
       const loadedCount = Object.keys(out).length;
       setAudioReady(loadedCount > 0);
 
-      if (loadedCount === stemOrder.length) {
+      // 트랜스포즈에 의한 리로드였으면 저장 위치에서 재개
+      if (resume) {
+        transposeResumeRef.current = null;
+        if (resume.wasPlaying && loadedCount > 0) void playAudio();
+      } else if (loadedCount === stemOrder.length) {
         toast("Audio decoded — ready");
       } else if (loadedCount > 0) {
         toast("Some stems failed to load (playing what we have)");
