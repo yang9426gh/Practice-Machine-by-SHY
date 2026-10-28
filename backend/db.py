@@ -165,6 +165,20 @@ def upsert_preset(
 ) -> None:
     con = sqlite3.connect(db_path(data_dir))
     try:
+        # 셸 프리셋(가사/코드만 미리 저장한 임시 행) 정리 — 실곡 데이터를 이관 후 삭제.
+        # 안 지우면 빈 카드가 라이브러리에 영구 누적됨.
+        shell_ids = (f"lyrics-{video_id}", f"chords-{video_id}")
+        con.execute(
+            """
+            UPDATE presets
+               SET lyrics_lrc = COALESCE(lyrics_lrc, (SELECT lyrics_lrc FROM presets WHERE id = ?)),
+                   chords_lrc = COALESCE(chords_lrc, (SELECT chords_lrc FROM presets WHERE id = ?))
+             WHERE id = ? AND (lyrics_lrc IS NULL OR chords_lrc IS NULL)
+            """,
+            (shell_ids[0], shell_ids[1], id),
+        )
+        con.execute("DELETE FROM presets WHERE id IN (?, ?)", shell_ids)
+
         con.execute(
             """
             INSERT INTO presets(id, name, source_url, video_id, title, thumbnail_url, bpm, key_tonic, key_mode, semitones, master_volume, vocal_volume)

@@ -1450,10 +1450,15 @@ export default function KaraokePage() {
 
       const out: Record<string, AudioBuffer> = {};
       let dur = 0;
+      let expected = 0; // 실제 로드 시도 대상 스템 수
 
       for (const stem of stemOrder) {
         const stemUrl = stems[stem];
         if (!stemUrl) continue;
+        expected++;
+
+        // 이탈(abort) 감지 시 즉시 중단 — 부분 결과의 캐시 저장 방지
+        if (abort.signal.aborted) return;
 
         setStemLoad((prev) => ({ ...prev, [stem]: { status: "loading", loaded: 0 } }));
 
@@ -1461,6 +1466,7 @@ export default function KaraokePage() {
           const ab = await fetchArrayBufferWithProgress(
             stemUrl,
             (loaded, total) => {
+              if (abort.signal.aborted) return;
               setStemLoad((prev) => ({
                 ...prev,
                 [stem]: { status: "loading", loaded, total },
@@ -1469,6 +1475,8 @@ export default function KaraokePage() {
             abort.signal
           );
 
+          if (abort.signal.aborted) return;
+
           setStemLoad((prev) => ({ ...prev, [stem]: { status: "decoding" } }));
 
           const buf = await ac.decodeAudioData(ab.slice(0));
@@ -1476,13 +1484,20 @@ export default function KaraokePage() {
           dur = Math.max(dur, buf.duration || 0);
           setStemLoad((prev) => ({ ...prev, [stem]: { status: "ready", duration: buf.duration || 0 } }));
         } catch (e: any) {
+          if (abort.signal.aborted) return; // 이탈로 인한 실패 — 조용히 중단
           const msg = String(e?.message || e);
           setStemLoad((prev) => ({ ...prev, [stem]: { status: "error", error: msg } }));
         }
       }
 
+      // 이탈 후에는 캐시/버퍼에 절대 기록하지 않음 (부분 결과 = 캐시 오염)
+      if (abort.signal.aborted) return;
+
       buffersRef.current = out;
-      decodedStemCache.set(cacheKey, out);
+      // 전부 성공한 완전한 결과만 캐시에 저장
+      if (Object.keys(out).length === expected && expected > 0) {
+        decodedStemCache.set(cacheKey, out);
+      }
       setAudioDuration(dur);
 
       const loadedCount = Object.keys(out).length;
@@ -1576,13 +1591,17 @@ export default function KaraokePage() {
 
     const canonical = `https://www.youtube.com/watch?v=${id}`;
 
-    // oEmbed early
+    // oEmbed early — 제목/썸네일은 지역변수로 보관 (state 클로저는 갱신 안 됨)
+    let oeTitle = "";
+    let oeThumb = "";
     try {
       const oe = await fetch(`https://www.youtube.com/oembed?url=${encodeURIComponent(canonical)}&format=json`);
       if (oe.ok) {
         const j = await oe.json();
-        setNowTitle(j.title || "");
-        setNowThumb(j.thumbnail_url || "");
+        oeTitle = j.title || "";
+        oeThumb = j.thumbnail_url || "";
+        setNowTitle(oeTitle);
+        setNowThumb(oeThumb);
       }
     } catch {}
 
@@ -1640,11 +1659,11 @@ export default function KaraokePage() {
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
             id,
-            name: nowTitle || id,
+            name: oeTitle || nowTitle || id,
             source_url: canonical,
             video_id: id,
-            title: nowTitle || null,
-            thumbnail_url: nowThumb || null,
+            title: oeTitle || nowTitle || null,
+            thumbnail_url: oeThumb || nowThumb || null,
             // Do NOT overwrite saved BPM/Key on autosave; those are set via Detect/manual edits.
             bpm: null,
             key_tonic: null,

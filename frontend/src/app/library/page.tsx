@@ -16,6 +16,9 @@ type Preset = {
   bpm?: number | null;
   key_tonic?: string | null;
   key_mode?: string | null;
+  semitones?: number;
+  master_volume?: number;
+  vocal_volume?: number;
   has_lyrics?: boolean;
   has_chords?: boolean;
 };
@@ -199,9 +202,9 @@ export default function LibraryPage() {
         title: p.title || null,
         thumbnail_url: p.thumbnail_url || null,
         bpm: p.bpm ?? null,
-        semitones: 0,
-        master_volume: 1.0,
-        vocal_volume: 1.0,
+        semitones: p.semitones ?? 0,
+        master_volume: p.master_volume ?? 1.0,
+        vocal_volume: p.vocal_volume ?? 1.0,
       }),
     });
     await refresh();

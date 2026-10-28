@@ -9,6 +9,7 @@ from pydantic import BaseModel
 import os
 import shutil
 import hashlib
+import subprocess
 import threading
 import traceback
 from typing import Optional
@@ -322,6 +323,9 @@ def run_pipeline_sync(url: str, on_stage=None) -> str:
         _stage(stage, p)
 
     if is_cancelled(task_id):
+        # 취소 플래그 정리 — 안 지우면 같은 곡 재추가 시 영구 실패
+        with RUNNING_LOCK:
+            CANCELLED.discard(task_id)
         raise RuntimeError("cancelled")
 
     _stage("downloading_video", 0)
@@ -524,6 +528,9 @@ async def clear_completed_queue():
 def run_pipeline(url: str, output_dir: str, task_id: str):
     try:
         if is_cancelled(task_id):
+            # 취소 플래그 정리 — 안 지우면 같은 곡 재추가 시 영구 실패
+            with RUNNING_LOCK:
+                CANCELLED.discard(task_id)
             raise RuntimeError("cancelled")
 
         vid = video_id_from_url(url)

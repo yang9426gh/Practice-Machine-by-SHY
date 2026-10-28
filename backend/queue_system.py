@@ -68,6 +68,7 @@ def queue_add(video_id: str, url: str, name: Optional[str] = None,
             "added_at": time.time(),
         }
         _QUEUE.append(item)
+        _worker_wake.set()  # 워커 즉시 각성 — 없으면 최대 30초 방치
         snap = _snapshot(item)
 
     if not _WORKER_STARTED:
