@@ -778,6 +778,33 @@ async def cancel_job(task_id: str):
     return {"ok": True, "removed_from_queue": removed}
 
 
+@app.post("/queue/{video_id}/cancel")
+async def cancel_queue_item(video_id: str):
+    """큐 항목 취소 (video_id 기반 — 실행 중 항목도 가능).
+    대기 중이면 큐에서 제거, 실행 중이면 내부 task_id를 역조회해 취소 플래그+프로세스 종료."""
+    from queue_system import queue_find, queue_active_task_id, queue_update
+
+    item = queue_find(video_id)
+    if item is None:
+        raise HTTPException(status_code=404, detail="not in queue")
+
+    # 대기 중이거나 에러/완료 상태면 큐에서 제거만
+    if item.get("status") == "queued":
+        removed = queue_remove(video_id)
+        return {"ok": True, "removed_from_queue": removed, "cancelled_running": False}
+
+    # 실행 중 → 내부 task_id 역조회 후 기존 취소 경로 재사용
+    tid = queue_active_task_id(video_id)
+    if not tid:
+        # task_id가 아직 없(거나 이미 끝남) — 큐 상태만 error로
+        queue_update(video_id, status="error", error="cancelled")
+        return {"ok": True, "removed_from_queue": False, "cancelled_running": False}
+
+    await cancel_job(tid)
+    queue_update(video_id, status="error", stage="cancelled", error="cancelled")
+    return {"ok": True, "removed_from_queue": False, "cancelled_running": True}
+
+
 @app.get("/tracks")
 async def library(limit: int = 50):
     """List cached tracks (for UI). /library는 SPA 라이브러리 페이지에 양보."""
@@ -1085,6 +1112,7 @@ async def export_mix(task_id: str, payload: dict = Body(default={})):  # noqa: B
 # Export Video — 영상 + 믹스 오디오 + 코드/가사 자막 번인 (백그라운드 작업 + 진행률 폴링)
 # -----------------------------
 _video_export_jobs: dict[str, dict] = {}
+_VIDEO_EXPORT_LOCK = threading.Lock()  # 동시 POST로 ffmpeg 2개 뜨는 race 방지
 
 
 def compute_gains(payload: dict, stem_names: list[str]) -> dict[str, float]:
@@ -1303,18 +1331,20 @@ async def export_video_start(task_id: str, payload: dict = Body(default={})):  #
     if not find_stems(out_dir):
         raise HTTPException(status_code=404, detail="Stems not ready")
 
-    cur = _video_export_jobs.get(task_id)
-    if cur and cur.get("stage") in ("mixing", "encoding"):
-        raise HTTPException(status_code=409, detail="Video export already running")
+    with _VIDEO_EXPORT_LOCK:
+        cur = _video_export_jobs.get(task_id)
+        if cur and cur.get("stage") in ("mixing", "encoding"):
+            raise HTTPException(status_code=409, detail="Video export already running")
 
-    _video_export_jobs[task_id] = {
-        "stage": "mixing",
-        "pct": 0,
-        "error": None,
-        "out": None,
-        "cancel": threading.Event(),
-        "proc": None,
-    }
+        # check-then-act race 방지 — 검사와 등록을 잠금 안에서 한 번에
+        _video_export_jobs[task_id] = {
+            "stage": "mixing",
+            "pct": 0,
+            "error": None,
+            "out": None,
+            "cancel": threading.Event(),
+            "proc": None,
+        }
     thread = threading.Thread(target=_run_video_export_job, args=(task_id, dict(payload or {})), daemon=True)
     thread.start()
     return {"ok": True, "task_id": task_id}

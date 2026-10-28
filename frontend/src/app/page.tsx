@@ -76,7 +76,18 @@ type StemLoadState =
   | { status: "ready"; duration: number }
   | { status: "error"; error: string };
 
+// 디코드된 스템 캐시 — LRU 상한 3곡 (곡당 수십~수백 MB라 무제한이면 메모리 누수)
+const DECODED_CACHE_MAX = 3;
 const decodedStemCache = new Map<string, Record<string, AudioBuffer>>();
+function cacheDecodedStems(key: string, buffers: Record<string, AudioBuffer>) {
+  // 기존 키면 삭제 후 재삽입 → Map 삽입 순서 = 최근 사용 순서
+  decodedStemCache.delete(key);
+  decodedStemCache.set(key, buffers);
+  while (decodedStemCache.size > DECODED_CACHE_MAX) {
+    const oldest = decodedStemCache.keys().next().value as string;
+    decodedStemCache.delete(oldest);
+  }
+}
 
 function stemIcon(stem: string) {
   const s = (stem || "").toLowerCase();
@@ -555,6 +566,7 @@ export default function KaraokePage() {
   const offsetRef = useRef<number>(0); // seconds into track when last started
 
   const loadAbortRef = useRef<AbortController | null>(null);
+  const jobPollRef = useRef<ReturnType<typeof setInterval> | null>(null); // 처리 상태 폴링 (언마운트 시 정리용)
 
   // ---- Lyrics handlers ----
   const lyricsFetchSaved = React.useCallback(async (vid: string) => {
@@ -1494,9 +1506,9 @@ export default function KaraokePage() {
       if (abort.signal.aborted) return;
 
       buffersRef.current = out;
-      // 전부 성공한 완전한 결과만 캐시에 저장
+      // 전부 성공한 완전한 결과만 캐시에 저장 (LRU 상한 적용)
       if (Object.keys(out).length === expected && expected > 0) {
-        decodedStemCache.set(cacheKey, out);
+        cacheDecodedStems(cacheKey, out);
       }
       setAudioDuration(dur);
 
@@ -1522,6 +1534,11 @@ export default function KaraokePage() {
       try {
         loadAbortRef.current?.abort();
       } catch {}
+      // 처리 상태 폴링 정리 — 안 지우면 페이지 이탈 후에도 무한 폴링
+      if (jobPollRef.current) {
+        clearInterval(jobPollRef.current);
+        jobPollRef.current = null;
+      }
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [cacheKey, stemOrder.join("|"), JSON.stringify(stems)]);
@@ -1582,6 +1599,12 @@ export default function KaraokePage() {
     setNowThumb("");
     setTaskId("");
     // bpm/key는 위에서 프리셋 메타 복원 전에 리셋됨 (이전 곡 값 잔존 방지)
+
+    // 이전 곡의 처리 폴링이 돌고 있으면 정리 (연속 로드 시 중복 폴링 방지)
+    if (jobPollRef.current) {
+      clearInterval(jobPollRef.current);
+      jobPollRef.current = null;
+    }
 
     resetPlayer();
 
@@ -1716,27 +1739,41 @@ export default function KaraokePage() {
       } catch {}
     }
 
+    let failCount = 0;
     const poll = setInterval(async () => {
       try {
         const sr = await fetch(`${BACKEND}/status/${tid}`);
         const sj = await sr.json();
+        failCount = 0; // 성공 시 카운터 리셋
         if (sj.stage) setStage(String(sj.stage));
         if (typeof sj.progress === "number") setProgress(sj.progress);
 
         if (sj.status === "completed") {
           clearInterval(poll);
+          jobPollRef.current = null;
           await applyCompletedStatus(sj);
         }
 
         if (sj.status === "error") {
           clearInterval(poll);
+          jobPollRef.current = null;
           setStatus("idle");
           toast("Job failed");
         }
       } catch {
-        // ignore
+        // 백엔드 응답 없음 — 15회(약 15초) 연속 실패 시 포기
+        failCount++;
+        if (failCount >= 15) {
+          clearInterval(poll);
+          jobPollRef.current = null;
+          setStatus("idle");
+          setStage("idle");
+          setProgress(0);
+          toast("Lost contact with server");
+        }
       }
     }, 1000);
+    jobPollRef.current = poll;
   };
 
   const saveMetaToLibrary = async (patch: any) => {

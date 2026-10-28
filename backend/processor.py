@@ -5,6 +5,26 @@ import time
 from typing import Callable, Optional
 
 
+def _terminate_proc(proc: subprocess.Popen) -> None:
+    """취소 시 자식 프로세스 확실히 정리 — terminate→wait→kill 계단식.
+    wait 없이 두면 좀비 프로세스 잔존 + stdout 파이프(파일디스크립터) 누수."""
+    try:
+        proc.terminate()
+        try:
+            proc.wait(timeout=5)
+        except subprocess.TimeoutExpired:
+            proc.kill()
+            proc.wait(timeout=5)
+    except Exception:
+        pass
+    finally:
+        try:
+            if proc.stdout:
+                proc.stdout.close()
+        except Exception:
+            pass
+
+
 def download_youtube_audio(
     url: str,
     output_path: str,
@@ -65,10 +85,7 @@ def download_youtube_audio(
 
     while True:
         if cancel_cb and cancel_cb():
-            try:
-                proc.terminate()
-            except Exception:
-                pass
+            _terminate_proc(proc)
             raise RuntimeError("cancelled")
 
         line = proc.stdout.readline() if proc.stdout else ""
@@ -160,10 +177,7 @@ def download_youtube_video(
 
     while True:
         if cancel_cb and cancel_cb():
-            try:
-                proc.terminate()
-            except Exception:
-                pass
+            _terminate_proc(proc)
             raise RuntimeError("cancelled")
 
         line = proc.stdout.readline() if proc.stdout else ""
@@ -238,10 +252,7 @@ def separate_stems(
     last_percent = None
     while True:
         if cancel_cb and cancel_cb():
-            try:
-                proc.terminate()
-            except Exception:
-                pass
+            _terminate_proc(proc)
             raise RuntimeError("cancelled")
 
         chunk = proc.stdout.readline() if proc.stdout else ""
@@ -281,10 +292,7 @@ def separate_stems(
         last_percent = None
         while True:
             if cancel_cb and cancel_cb():
-                try:
-                    proc2.terminate()
-                except Exception:
-                    pass
+                _terminate_proc(proc2)
                 raise RuntimeError("cancelled")
 
             chunk = proc2.stdout.readline() if proc2.stdout else ""

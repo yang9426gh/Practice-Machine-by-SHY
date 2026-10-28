@@ -107,6 +107,18 @@ def queue_update(video_id: str, **patch) -> None:
                 return
 
 
+def queue_active_task_id(video_id: str) -> Optional[str]:
+    """실행 중(downloading/separating/processing) 항목의 task_id 역조회.
+    task_id는 run_pipeline_sync가 TASKS에 등록한 것 — 진행 중 항목 취소에 사용."""
+    with _QLOCK:
+        for x in _QUEUE:
+            if x["video_id"] == video_id and x["status"] in ("downloading", "separating", "processing"):
+                tid = x.get("task_id")
+                if tid:
+                    return tid
+    return None
+
+
 def queue_find(video_id: str) -> Optional[dict]:
     with _QLOCK:
         for x in _QUEUE:
@@ -141,6 +153,8 @@ def _worker_loop():
 
         vid = item["video_id"]
         try:
+            # task_id는 run_pipeline_sync 내부에서 생성되므로 취소 API가 쓸 수 있게
+            # video_id→task_id 매핑을 진입 직후 노출 (완료 때까지 매칭 함수로 역조회)
             task_id = run_pipeline_sync(
                 item["url"],
                 on_stage=lambda stage, prog: _on_progress(vid, stage, prog),
@@ -152,7 +166,6 @@ def _worker_loop():
                 queue_update(vid, status="error", error="cancelled")
             else:
                 queue_update(vid, status="error", error=msg[:300])
-
 
 def _on_progress(video_id: str, stage: str, progress: int) -> None:
     # 파이프라인 stage → 큐 status 매핑
