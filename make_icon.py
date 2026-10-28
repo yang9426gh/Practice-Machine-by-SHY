@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Holy Karaoke 앱 아이콘 생성 (PIL) → assets/app.iconset → app.icns
+"""Practice Machine 앱 아이콘 생성 (PIL) → assets/app.iconset → app.icns
 사용: /usr/bin/python3 make_icon.py   (macOS 시스템 파이썬, Pillow 필요)
 """
 import os

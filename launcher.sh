@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Holy Karaoke Stems — 원클릭 스마트 런처
+# Practice Machine by SHY — 원클릭 스마트 런처
 # .app 더블클릭 → 필요하면 자동 설치 → 서버 기동 → 브라우저 오픈
 #   환경: 최초 1회 venv+의존성 설치 (몇 분), 이후는 즉시 기동
 set -u
@@ -8,8 +8,8 @@ ROOT="$(pwd)"
 PORT="${HOLY_PORT:-8011}"
 LOG="$ROOT/launcher.log"
 
-say() { osascript -e "display notification \"${1//\"/}\" with title \"Holy Karaoke Stems\"" 2>/dev/null; }
-dialog() { osascript -e "display dialog \"${1//\"/}\" with title \"Holy Karaoke Stems\" buttons {\"OK\"} default button 1 with icon note" >/dev/null 2>&1; }
+say() { osascript -e "display notification \"${1//\"/}\" with title \"Practice Machine by SHY\"" 2>/dev/null; }
+dialog() { osascript -e "display dialog \"${1//\"/}\" with title \"Practice Machine by SHY\" buttons {\"OK\"} default button 1 with icon note" >/dev/null 2>&1; }
 
 # Finder/launchd 실행 시 PATH가 /usr/bin:/bin 뿐 — Homebrew(node, ffmpeg 등) 접근 보장
 export PATH="/opt/homebrew/bin:/usr/local/bin:$PATH"

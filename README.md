@@ -1,4 +1,4 @@
-# Holy Karaoke Stems 🎤 v1.1
+# Practice Machine by SHY 🎤 v1.1
 
 YouTube 노래를 AI로 스템 분리(보컬/반주/드럼/베이스...)해서 노래방처럼 부르는 앱.
 
@@ -52,7 +52,7 @@ YouTube 노래를 AI로 스템 분리(보컬/반주/드럼/베이스...)해서 �
 
 기본은 **이 컴퓨터 전용**(127.0.0.1) — 외부에서 접속 불가.
 
-- 원클릭 앱: **"Holy Karaoke Stems 외부접속 전환"** 더블클릭 = 켜기/끄기 토글
+- 원클릭 앱: **"Practice Machine by SHY 외부접속 전환"** 더블클릭 = 켜기/끄기 토글
   (켜면 같은 와이파이 기기에서 `http://<맥 IP>:8011` 접속, IP는 팝업에 표시)
 - 수동: `backend/settings.env`에 `HOLY_HOST=0.0.0.0` 저장 후 서버 재시작
 
@@ -84,11 +84,11 @@ YouTube 노래를 AI로 스템 분리(보컬/반주/드럼/베이스...)해서 �
 ./build_package.sh
 ```
 
-→ `dist/Holy-Karaoke-Stems-v1.2.0.dmg` 생성 (zip 백업 동봉).
+→ `dist/Practice-Machine-by-SHY-v1.4.0.dmg` 생성 (zip 백업 동봉).
 
 받는 쪽에서는:
-1. DMG 열기 → `Holy Karaoke Stems` 폴더를 원하는 위치로 이동
-2. 폴더 안 `Holy Karaoke Stems` 앱 더블클릭 — 첫 실행에 Python 런타임/의존성 자동 설치 후 브라우저 자동 오픈
+1. DMG 열기 → `Practice Machine by SHY` 폴더를 원하는 위치로 이동
+2. 폴더 안 `Practice Machine by SHY` 앱 더블클릭 — 첫 실행에 Python 런타임/의존성 자동 설치 후 브라우저 자동 오픈
 3. 처음 한 번 "확인되지 않은 개발자" 경고 시: 시스템 설정 → 개인정보 보호 및 보안 → 확인 없이 열기
 
-앱 3종: `Holy Karaoke Stems`(설치+실행) / `종료`(서버 정지) / `제거`(완전 삭제). 프론트 빌드물이 포함되어 받는 맥에 Node 불필요.
+앱 3종: `Practice Machine by SHY`(설치+실행) / `종료`(서버 정지) / `제거`(완전 삭제). 프론트 빌드물이 포함되어 받는 맥에 Node 불필요.

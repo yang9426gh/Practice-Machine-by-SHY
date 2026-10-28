@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Holy Karaoke Stems — 언인스톨
+# Practice Machine by SHY — 언인스톨
 #
 # 사용:
 #   ./uninstall.sh              # 대화형 (질문에 y/n — 엔터=안전 기본값)
@@ -9,7 +9,7 @@ set -euo pipefail
 cd "$(dirname "${BASH_SOURCE[0]}")"
 ROOT="$(pwd)"
 
-echo "🎤 Holy Karaoke Stems 언인스톨"
+echo "🎤 Practice Machine by SHY 언인스톨"
 
 # ---------- 1) 실행 중인 서버 종료 ----------
 if [ -f backend/run.pid ]; then
@@ -74,7 +74,7 @@ fi
 read -r -p "이 폴더 자체를 삭제할까요? ($ROOT) [y/N]: " A3 || A3=""
 if [[ "${A3:-N}" =~ ^[Yy] ]]; then
   if [ "$KEEP_DATA" = "1" ] && [ -d backend/data ]; then
-    BACKUP="$HOME/holy-karaoke-data-backup"
+    BACKUP="$HOME/practice-machine-data-backup"
     echo "📦 데이터 보존 이동: $BACKUP"
     rm -rf "$BACKUP"
     mv backend/data "$BACKUP"

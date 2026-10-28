@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Holy Karaoke Stems — 외부접속(같은 와이파이 기기) 켜기/끄기 토글
+# Practice Machine by SHY — 외부접속(같은 와이파이 기기) 켜기/끄기 토글
 #   켜기: 서버를 0.0.0.0 으로 재시작 (폰/태블릿에서 접속 가능)
 #   끄기: 서버를 127.0.0.1 로 재시작 (이 컴퓨터 전용, 기본값)
 set -u
@@ -9,9 +9,9 @@ PORT="${HOLY_PORT:-8011}"
 SETTINGS="$ROOT/backend/settings.env"
 LOG="$ROOT/toggle.log"
 
-say() { osascript -e "display notification \"${1//\"/}\" with title \"Holy Karaoke Stems\"" 2>/dev/null; }
+say() { osascript -e "display notification \"${1//\"/}\" with title \"Practice Machine by SHY\"" 2>/dev/null; }
 # dialog: OK 클릭 없으면 120초 후 자동 닫힘 (giving up after) — 뜬채로 멈추지 않게
-dialog() { osascript -e "display dialog \"${1//\"/}\" with title \"Holy Karaoke Stems\" buttons {\"OK\"} default button 1 with icon note giving up after 120" >/dev/null 2>&1; }
+dialog() { osascript -e "display dialog \"${1//\"/}\" with title \"Practice Machine by SHY\" buttons {\"OK\"} default button 1 with icon note giving up after 120" >/dev/null 2>&1; }
 
 exec > >(tee -a "$LOG") 2>&1
 echo "=== $(date '+%F %T') toggle start ==="

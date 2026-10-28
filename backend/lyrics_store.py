@@ -17,7 +17,7 @@ import urllib.error
 import json
 
 LRCLIB_BASE = "https://lrclib.net/api"
-UA = "HolyKaraokeStems/0.2 (https://github.com/local/holy-karaoke)"
+UA = "PracticeMachine/1.0"
 
 LRC_TIME_RE = re.compile(r"\[(\d{1,3}):(\d{1,2})(?:[.:](\d{1,3}))?\]")
 OFFSET_TAG_RE = re.compile(r"^\[offset:\s*([+-]?\d+)\s*\]", re.IGNORECASE)

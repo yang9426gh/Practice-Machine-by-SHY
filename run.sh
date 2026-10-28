@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Holy Karaoke Stems — 실행 (단일 프로세스: FastAPI가 프론트까지 서빙)
+# Practice Machine by SHY — 실행 (단일 프로세스: FastAPI가 프론트까지 서빙)
 set -euo pipefail
 cd "$(dirname "${BASH_SOURCE[0]}")"
 ROOT="$(pwd)"
@@ -34,7 +34,7 @@ fi
 DATA_DIR="${HOLY_DATA_DIR:-$ROOT/backend/data}"
 mkdir -p "$DATA_DIR"
 
-echo "🎤 Holy Karaoke Stems 시작 → http://localhost:$PORT (바인딩: $HOST)"
+echo "🎤 Practice Machine by SHY 시작 → http://localhost:$PORT (바인딩: $HOST)"
 cd "$ROOT/backend"
 source venv/bin/activate
 

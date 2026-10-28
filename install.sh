@@ -1,11 +1,11 @@
 #!/usr/bin/env bash
-# Holy Karaoke Stems — 설치 스크립트 (최초 1회)
+# Practice Machine by SHY — 설치 스크립트 (최초 1회)
 # 필요: Python 3.10+, Node 18+ (프론트 빌드용)
 set -euo pipefail
 cd "$(dirname "${BASH_SOURCE[0]}")"
 ROOT="$(pwd)"
 
-echo "🎤 Holy Karaoke Stems 설치"
+echo "🎤 Practice Machine by SHY 설치"
 
 # ---------- 사전 확인 ----------
 # 파이썬 선택: 3.10+ 필수 (CLT 구버전 3.9 회피)
