@@ -70,6 +70,7 @@ echo "🔧 .app 번들 생성..."
 make_app "Holy Karaoke Stems" "launcher.sh" "start"
 make_app "Holy Karaoke Stems 종료" "stop.sh" "stop"
 make_app "Holy Karaoke Stems 제거" "uninstall.sh" "uninstall"
+make_app "Holy Karaoke Stems 로그" "view_log.sh" "log"
 
 cat > "$APPDIR/! 먼저 읽으세요.txt" <<'EOF'
 🎤 Holy Karaoke Stems — 설치/사용 안내
@@ -84,6 +85,8 @@ cat > "$APPDIR/! 먼저 읽으세요.txt" <<'EOF'
 
 3. 서버 끄기:  "Holy Karaoke Stems 종료" 앱 더블클릭
 4. 완전 삭제:  "Holy Karaoke Stems 제거" 앱 더블클릭 (곡 데이터 포함 삭제)
+5. 에러 확인:  "Holy Karaoke Stems 로그" 앱 더블클릭 — 서버 로그가 콘솔 앱에서 실시간 표시됩니다
+   (에러가 났으면 이 로그를 복사해서 공유하면 됩니다)
 
 ※ 처음 열 때 "확인되지 않은 개발자" 경고가 뜨면 (macOS 보안 정책):
    시스템 설정 → 개인정보 보호 및 보안 → 맨 아래 "확인 없이 열기" 버튼 클릭
