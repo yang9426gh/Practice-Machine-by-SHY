@@ -14,7 +14,7 @@
 set -euo pipefail
 cd "$(dirname "${BASH_SOURCE[0]}")"
 ROOT="$(pwd)"
-VERSION="1.2.0"
+VERSION="1.3.0"
 STAGE="$(mktemp -d)"
 DMG_DIR="$STAGE/dmg"
 APPDIR="$DMG_DIR/Holy Karaoke Stems"   # 배포 폴더 = 프로젝트 루트 (앱들이 그 안에 위치)
