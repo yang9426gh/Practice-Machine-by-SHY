@@ -11,6 +11,9 @@ LOG="$ROOT/launcher.log"
 say() { osascript -e "display notification \"${1//\"/}\" with title \"Holy Karaoke Stems\"" 2>/dev/null; }
 dialog() { osascript -e "display dialog \"${1//\"/}\" with title \"Holy Karaoke Stems\" buttons {\"OK\"} default button 1 with icon note" >/dev/null 2>&1; }
 
+# Finder/launchd 실행 시 PATH가 /usr/bin:/bin 뿐 — Homebrew(node, ffmpeg 등) 접근 보장
+export PATH="/opt/homebrew/bin:/usr/local/bin:$PATH"
+
 exec > >(tee -a "$LOG") 2>&1
 echo "=== $(date '+%F %T') launcher start ==="
 

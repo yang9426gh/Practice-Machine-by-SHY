@@ -1,4 +1,5 @@
 import os
+import shutil
 import sys
 import subprocess
 import time
@@ -23,6 +24,41 @@ def _terminate_proc(proc: subprocess.Popen) -> None:
                 proc.stdout.close()
         except Exception:
             pass
+
+
+def find_node() -> str:
+    """node 런타임 탐색 — .app(Finder/launchd) 실행 시 PATH가 /usr/bin:/bin 뿐이라
+    Homebrew node를 못 찾는 문제 대응. 절대경로 후보를 직접 확인."""
+    found = shutil.which("node")
+    if found:
+        return found
+    for p in (
+        "/opt/homebrew/bin/node",
+        "/usr/local/bin/node",
+        os.path.expanduser("~/.nvm/versions/node"),  # nvm은 최신 버전 디렉토리 스캔
+    ):
+        if os.path.isfile(p):
+            return p
+        if os.path.isdir(p):
+            try:
+                vers = sorted(os.listdir(p))
+                if vers:
+                    cand = os.path.join(p, vers[-1], "bin", "node")
+                    if os.path.isfile(cand):
+                        return cand
+            except Exception:
+                pass
+    return ""
+
+
+def _raise_cmd_error(rc: int, cmd: list, log_tail: str = "") -> None:
+    """CalledProcessError에 실제 실패 로그 꼬리를 붙임 — UI에서 진단 가능하게.
+    log_tail 없이 던지면 'Command [...' 만 보여서 원인을 알 수 없음."""
+    msg = f"Command {cmd!r} returned non-zero exit status {rc}."
+    if log_tail:
+        tail = "\n".join(log_tail.strip().splitlines()[-8:])
+        msg += f"\n--- yt_dlp 출력 마지막 부분 ---\n{tail}"
+    raise RuntimeError(msg)
 
 
 def download_youtube_audio(
@@ -50,7 +86,11 @@ def download_youtube_audio(
     # Optional: enable JS runtime for signature/challenge solving.
     # Without it, some videos show: "Only images are available" / "Requested format is not available".
     # Enable by setting HOLY_YTDLP_JS_RUNTIMES=node|deno|bun|node:/path/to/node
-    jsr = os.environ.get("HOLY_YTDLP_JS_RUNTIMES", "node").strip()
+    jsr = os.environ.get("HOLY_YTDLP_JS_RUNTIMES", "").strip()
+    if jsr == "":
+        # 기본 node — PATH에 없으면 절대경로 직접 탐색(.app 실행 시 PATH가 좁음)
+        node = find_node()
+        jsr = f"node:{node}" if node else ""
     if jsr:
         cmd += ["--js-runtimes", jsr]
 
@@ -83,6 +123,7 @@ def download_youtube_audio(
     import re
     pct_re = re.compile(r"\[download\]\s+(\d{1,3}(?:\.\d+)?)%")
 
+    log_buf: list = []  # 실패 시 UI에 보여줄 로그 꼬리
     while True:
         if cancel_cb and cancel_cb():
             _terminate_proc(proc)
@@ -91,6 +132,9 @@ def download_youtube_audio(
         line = proc.stdout.readline() if proc.stdout else ""
         if line:
             print(line, end="")
+            log_buf.append(line)
+            if len(log_buf) > 40:
+                log_buf.pop(0)
             m = pct_re.search(line)
             if m and progress_cb:
                 try:
@@ -105,10 +149,9 @@ def download_youtube_audio(
 
     rc = proc.wait()
     if rc != 0:
-        raise subprocess.CalledProcessError(rc, cmd)
+        _raise_cmd_error(rc, cmd, "".join(log_buf))
 
     return f"{output_path}/original.wav"
-
 
 def download_youtube_video(
     url: str,
@@ -143,7 +186,11 @@ def download_youtube_video(
     if cfb:
         cmd += ["--cookies-from-browser", cfb]
 
-    jsr = os.environ.get("HOLY_YTDLP_JS_RUNTIMES", "node").strip()
+    # Optional: enable JS runtime for signature/challenge solving.
+    jsr = os.environ.get("HOLY_YTDLP_JS_RUNTIMES", "").strip()
+    if jsr == "":
+        node = find_node()
+        jsr = f"node:{node}" if node else ""
     if jsr:
         cmd += ["--js-runtimes", jsr]
 
@@ -175,6 +222,7 @@ def download_youtube_video(
     import re
     pct_re = re.compile(r"\[download\]\s+(\d{1,3}(?:\.\d+)?)%")
 
+    log_buf: list = []  # 실패 시 UI에 보여줄 로그 꼬리
     while True:
         if cancel_cb and cancel_cb():
             _terminate_proc(proc)
@@ -183,6 +231,9 @@ def download_youtube_video(
         line = proc.stdout.readline() if proc.stdout else ""
         if line:
             print(line, end="")
+            log_buf.append(line)
+            if len(log_buf) > 40:
+                log_buf.pop(0)
             m = pct_re.search(line)
             if m and progress_cb:
                 try:
@@ -197,11 +248,10 @@ def download_youtube_video(
 
     rc = proc.wait()
     if rc != 0:
-        raise subprocess.CalledProcessError(rc, cmd)
+        _raise_cmd_error(rc, cmd, "".join(log_buf))
 
     if progress_cb:
         progress_cb(100)
-
     return out
 
 
@@ -290,6 +340,7 @@ def separate_stems(
             proc_cb(proc2)
 
         last_percent = None
+        log_buf2: list = []  # 실패 시 UI에 보여줄 로그 꼬리
         while True:
             if cancel_cb and cancel_cb():
                 _terminate_proc(proc2)
@@ -300,6 +351,10 @@ def separate_stems(
                 break
             if not chunk:
                 continue
+
+            log_buf2.append(chunk)
+            if len(log_buf2) > 40:
+                log_buf2.pop(0)
 
             m = percent_re.search(chunk)
             if m:
@@ -315,7 +370,7 @@ def separate_stems(
 
         rc2 = proc2.wait()
         if rc2 != 0:
-            raise subprocess.CalledProcessError(rc2, cmd2)
+            _raise_cmd_error(rc2, cmd2, "".join(log_buf2))
 
     if progress_cb:
         progress_cb(100)
