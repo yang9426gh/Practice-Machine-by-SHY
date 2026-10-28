@@ -3,6 +3,7 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { Play, Pause, ChevronUp, ChevronDown, Maximize, Minimize } from "lucide-react";
+import { BrandHeader } from "../components/Brand";
 
 const BACKEND = process.env.NEXT_PUBLIC_BACKEND_URL || (typeof window !== "undefined" ? window.location.origin : "http://localhost:8011");
 
@@ -1972,7 +1973,11 @@ export default function KaraokePage() {
   return (
     <main className="relative flex flex-col h-screen bg-black text-white overflow-hidden">
       <div className="p-4 border-b border-zinc-800 bg-zinc-950">
-        <div className="flex gap-2 items-center">
+        <div className="flex gap-2 items-center relative">
+          {/* 브랜드 헤더 — 상단 중앙 */}
+          <div className="absolute left-1/2 -translate-x-1/2">
+            <BrandHeader />
+          </div>
           {/* URL 로드는 라이브러리 메뉴에서 큐로 이동 — 재생 컨트롤만 상단에 */}
 
           {/* 큐 인디케이터 — 백그라운드 작업 중일 때만 표시, 하단 프로그레스 바가 전체 진행률을 채움 */}

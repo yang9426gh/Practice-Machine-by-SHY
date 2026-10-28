@@ -2,8 +2,8 @@ import "./globals.css";
 import type { Metadata } from "next";
 
 export const metadata: Metadata = {
-  title: "Clawd Karaoke AI",
-  description: "Apple Music style karaoke with AI voice separation",
+  title: "Practice Machine by SHY",
+  description: "Karaoke practice machine — stems, lyrics & chords",
 };
 
 export default function RootLayout({
