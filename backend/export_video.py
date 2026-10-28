@@ -231,24 +231,29 @@ def export_video(
     video_path: str,
     stems: Dict[str, str],
     gains: Dict[str, float],
-    ass_path: str,
+    ass_path: str = "",
     out_path: str,
     duration_hint: float = 0.0,
     progress_cb: Optional[Callable[[int], None]] = None,
     cancel_event=None,
     proc_holder: Optional[dict] = None,
 ) -> str:
-    """영상 + (스템 믹스 오디오) + ASS 자막 번인 → mp4. libass 한글은 macOS 시스템 폰트 사용."""
+    """영상 + (스템 믹스 오디오) + ASS 자막 번인(선택) → mp4. libass 한글은 macOS 시스템 폰트 사용.
+    ass_path가 빈 문자열이면 자막 없이 인코딩 (가사/코드 없는 곡 지원)."""
     os.makedirs(os.path.dirname(out_path), exist_ok=True)
 
     ff = _ffmpeg()
     # 영상이 input 0이므로 스템 입력은 1부터 — [0:a](영상 원본 오디오)가 믹스에 섞이지 않게 함
     mix_inputs, mix_fc, aout = build_mix_args(stems, gains, input_offset=1)
 
-    ass_arg = ass_path.replace("\\", "/").replace(":", "\\:")
-    fonts_dirs = "/System/Library/Fonts:/System/Library/Fonts/Supplemental".replace(":", "\\:")
-    vf = f"subtitles=filename='{ass_arg}':fontsdir='{fonts_dirs}'"
-    fc = f"[0:v]{vf}[vout];" + mix_fc
+    # 자막이 있을 때만 subtitles 필터 적용 (없으면 영상 그대로)
+    if ass_path and os.path.exists(ass_path):
+        ass_arg = ass_path.replace("\\", "/").replace(":", "\\:")
+        fonts_dirs = "/System/Library/Fonts:/System/Library/Fonts/Supplemental".replace(":", "\\:")
+        vf = f"subtitles=filename='{ass_arg}':fontsdir='{fonts_dirs}'"
+        fc = f"[0:v]{vf}[vout];" + mix_fc
+    else:
+        fc = f"[0:v]null[vout];" + mix_fc
 
     cmd = [
         ff,

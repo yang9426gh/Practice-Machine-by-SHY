@@ -1225,27 +1225,29 @@ def _run_video_export_job(task_id: str, payload: dict) -> None:
             except Exception:
                 chord_lines = []
 
-        if not chord_lines and not lyric_lines:
-            raise RuntimeError("No lyrics/chords saved — nothing to overlay")
-
         _check_cancel()
         w, h, dur = probe_video(video_file)
         chord_shift = int(payload.get("semitones", 0) or 0) + int(payload.get("key_adj", 0) or 0)
-        ass_text = build_ass(
-            width=w,
-            height=h,
-            chord_lines=chord_lines,
-            lyric_lines=lyric_lines,
-            chord_shift=chord_shift,
-        )
 
-        export_dir = os.path.join(DATA_DIR, task_id, "exports")
-        os.makedirs(export_dir, exist_ok=True)
-        ass_path = os.path.join(export_dir, "overlay.ass")
-        with open(ass_path, "w", encoding="utf-8") as f:
-            f.write(ass_text)
+        # 자막: 가사/코드가 하나라도 있을 때만 생성 (둘 다 없으면 자막 없이 인코딩)
+        ass_path = ""
+        if chord_lines or lyric_lines:
+            ass_text = build_ass(
+                width=w,
+                height=h,
+                chord_lines=chord_lines,
+                lyric_lines=lyric_lines,
+                chord_shift=chord_shift,
+            )
+            export_dir = os.path.join(DATA_DIR, task_id, "exports")
+            os.makedirs(export_dir, exist_ok=True)
+            ass_path = os.path.join(export_dir, "overlay.ass")
+            with open(ass_path, "w", encoding="utf-8") as f:
+                f.write(ass_text)
 
         job["stage"] = "encoding"
+        export_dir = os.path.join(DATA_DIR, task_id, "exports")
+        os.makedirs(export_dir, exist_ok=True)
         out_mp4 = os.path.join(export_dir, "video_mix.mp4")
 
         def _prog(pct: int):
