@@ -1850,6 +1850,10 @@ export default function KaraokePage() {
         const sj = await sr.json();
         if (!sr.ok) throw new Error(sj?.detail || "status failed");
         if (sj.stage === "error") throw new Error(sj.error || "export failed");
+        if (sj.stage === "cancelled") {
+          toast("Export video 취소됨");
+          return;
+        }
         setVideoExportPct(Math.max(1, Number(sj.pct) || 0));
         if (sj.stage === "done") {
           const url = `${BACKEND}${sj.out}`;
@@ -1875,6 +1879,14 @@ export default function KaraokePage() {
     } finally {
       setVideoExportPct(null);
     }
+  };
+
+  // 인코딩 중 취소 — ffmpeg 종료 + 부분 파일 삭제
+  const cancelVideoExport = async () => {
+    if (!taskId || videoExportPct == null) return;
+    try {
+      await fetch(`${BACKEND}/export/video/${taskId}/cancel`, { method: "POST" });
+    } catch {}
   };
 
   // ---------- Fullscreen mode (영상 영역 전체화면 + 코드/가사 오버레이) ----------
@@ -2014,6 +2026,15 @@ export default function KaraokePage() {
           >
             {videoExportPct != null ? `Encoding ${videoExportPct}%` : "Export Video"}
           </button>
+          {videoExportPct != null ? (
+            <button
+              onClick={cancelVideoExport}
+              className="px-2.5 py-2 rounded-lg border border-red-900/60 text-red-300 hover:bg-red-950/30 text-sm"
+              title="Export Video 취소"
+            >
+              ✕
+            </button>
+          ) : null}
         </div>
       </div>
 

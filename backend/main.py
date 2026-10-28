@@ -1176,8 +1176,13 @@ def _video_id_for_task(task_id: str) -> Optional[str]:
 def _run_video_export_job(task_id: str, payload: dict) -> None:
     job = _video_export_jobs[task_id]
     try:
-        from export_video import build_ass, export_video, probe_video
+        from export_video import VideoExportCancelled, build_ass, export_video, probe_video
 
+        def _check_cancel():
+            if job["cancel"].is_set():
+                raise VideoExportCancelled()
+
+        _check_cancel()
         video_file = os.path.join(DATA_DIR, task_id, "video.mp4")
         if not os.path.exists(video_file):
             raise RuntimeError("Video file not found for this track")
@@ -1223,6 +1228,7 @@ def _run_video_export_job(task_id: str, payload: dict) -> None:
         if not chord_lines and not lyric_lines:
             raise RuntimeError("No lyrics/chords saved — nothing to overlay")
 
+        _check_cancel()
         w, h, dur = probe_video(video_file)
         chord_shift = int(payload.get("semitones", 0) or 0) + int(payload.get("key_adj", 0) or 0)
         ass_text = build_ass(
@@ -1245,15 +1251,27 @@ def _run_video_export_job(task_id: str, payload: dict) -> None:
         def _prog(pct: int):
             job["pct"] = int(pct)
 
-        export_video(
-            video_path=video_file,
-            stems=stems,
-            gains=gains,
-            ass_path=ass_path,
-            out_path=out_mp4,
-            duration_hint=dur,
-            progress_cb=_prog,
-        )
+        _check_cancel()
+        try:
+            export_video(
+                video_path=video_file,
+                stems=stems,
+                gains=gains,
+                ass_path=ass_path,
+                out_path=out_mp4,
+                duration_hint=dur,
+                progress_cb=_prog,
+                cancel_event=job["cancel"],
+                proc_holder=job,
+            )
+        except VideoExportCancelled:
+            try:
+                os.remove(out_mp4)  # 부분 인코딩 파일 삭제
+            except OSError:
+                pass
+            job["pct"] = 0
+            job["stage"] = "cancelled"
+            return
 
         job["pct"] = 100
         job["stage"] = "done"
@@ -1277,13 +1295,40 @@ async def export_video_start(task_id: str, payload: dict = Body(default={})):  #
         raise HTTPException(status_code=404, detail="Stems not ready")
 
     cur = _video_export_jobs.get(task_id)
-    if cur and cur.get("stage") not in ("done", "error", None):
+    if cur and cur.get("stage") in ("mixing", "encoding"):
         raise HTTPException(status_code=409, detail="Video export already running")
 
-    _video_export_jobs[task_id] = {"stage": "mixing", "pct": 0, "error": None, "out": None}
+    _video_export_jobs[task_id] = {
+        "stage": "mixing",
+        "pct": 0,
+        "error": None,
+        "out": None,
+        "cancel": threading.Event(),
+        "proc": None,
+    }
     thread = threading.Thread(target=_run_video_export_job, args=(task_id, dict(payload or {})), daemon=True)
     thread.start()
     return {"ok": True, "task_id": task_id}
+
+
+@app.post("/export/video/{task_id}/cancel")
+async def export_video_cancel(task_id: str):
+    """진행 중인 Export Video 취소. ffmpeg 프로세스 종료 + 부분 파일 삭제됨."""
+    job = _video_export_jobs.get(task_id)
+    if job is None:
+        raise HTTPException(status_code=404, detail="no video export job")
+    if job.get("stage") not in ("mixing", "encoding"):
+        return {"ok": True, "cancelled": False, "stage": job.get("stage")}  # 이미 종료됨 — 무시
+
+    job["cancel"].set()
+    proc = job.get("proc")
+    if proc is not None:
+        try:
+            if proc.poll() is None:
+                proc.terminate()
+        except Exception:
+            pass
+    return {"ok": True, "cancelled": True}
 
 
 @app.get("/export/video/{task_id}/status")
@@ -1291,7 +1336,13 @@ async def export_video_status(task_id: str):
     job = _video_export_jobs.get(task_id)
     if job is None:
         raise HTTPException(status_code=404, detail="no video export job")
-    return job
+    # Event/Popen 객체는 직렬화 불가 — 클라이언트에 필요한 필드만 반환
+    return {
+        "stage": job.get("stage"),
+        "pct": job.get("pct"),
+        "error": job.get("error"),
+        "out": job.get("out"),
+    }
 
 
 @app.delete("/presets/{preset_id}")

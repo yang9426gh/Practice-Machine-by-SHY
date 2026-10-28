@@ -222,6 +222,10 @@ def probe_video(path: str) -> Tuple[int, int, float]:
 _TIME_RE = re.compile(r"time=(\d+):(\d+):(\d+(?:\.\d+)?)")
 
 
+class VideoExportCancelled(Exception):
+    """사용자가 Export Video를 취소함."""
+
+
 def export_video(
     *,
     video_path: str,
@@ -231,6 +235,8 @@ def export_video(
     out_path: str,
     duration_hint: float = 0.0,
     progress_cb: Optional[Callable[[int], None]] = None,
+    cancel_event=None,
+    proc_holder: Optional[dict] = None,
 ) -> str:
     """영상 + (스템 믹스 오디오) + ASS 자막 번인 → mp4. libass 한글은 macOS 시스템 폰트 사용."""
     os.makedirs(os.path.dirname(out_path), exist_ok=True)
@@ -271,10 +277,22 @@ def export_video(
         bufsize=1,
         universal_newlines=True,
     )
+    if proc_holder is not None:
+        proc_holder["proc"] = proc
+
+    def _stop_if_cancelled():
+        if cancel_event is not None and cancel_event.is_set():
+            proc.terminate()
+            try:
+                proc.wait(timeout=5)
+            except Exception:
+                proc.kill()
+            raise VideoExportCancelled()
 
     total = float(duration_hint or 0.0)
     assert proc.stdout is not None
     for line in proc.stdout:
+        _stop_if_cancelled()
         if progress_cb and total > 0:
             m = _TIME_RE.search(line)
             if m:
@@ -282,6 +300,7 @@ def export_video(
                 progress_cb(max(0, min(99, int(t / total * 100))))
 
     rc = proc.wait()
+    _stop_if_cancelled()
     if rc != 0:
         raise RuntimeError(f"ffmpeg export video failed (exit {rc})")
     return out_path
