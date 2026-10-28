@@ -1974,11 +1974,13 @@ export default function KaraokePage() {
     <main className="relative flex flex-col h-screen bg-black text-white overflow-hidden">
       <div className="p-4 border-b border-zinc-800 bg-zinc-950">
         <div className="flex gap-2 items-center relative">
-          {/* Support 버튼 — 로고 왼쪽 */}
-          <SupportButton />
           {/* 브랜드 헤더 — 상단 중앙 */}
           <div className="absolute left-1/2 -translate-x-1/2">
             <BrandHeader />
+          </div>
+          {/* Support 버튼 — 중앙 로고 바로 왼쪽 */}
+          <div className="absolute right-1/2 mr-[172px] top-1/2 -translate-y-1/2">
+            <SupportButton />
           </div>
           {/* URL 로드는 라이브러리 메뉴에서 큐로 이동 — 재생 컨트롤만 상단에 */}
 

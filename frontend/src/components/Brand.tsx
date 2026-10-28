@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import { createPortal } from "react-dom";
 
 export function CassetteLogo({ size = 26 }: { size?: number }) {
   return (
@@ -63,16 +64,20 @@ function PayPalMark() {
   );
 }
 
+function ZelleMark() {
+  return <span className="font-extrabold text-lg tracking-tight text-[#6D1ED4]">Zelle</span>;
+}
+
 export function SupportButton() {
   const [open, setOpen] = useState(false);
-  const [copied, setCopied] = useState("");
+  const [copied, setCopied] = useState(false);
 
-  const copy = async (text: string, key: string) => {
+  const copyZelle = async () => {
     try {
-      await navigator.clipboard.writeText(text);
+      await navigator.clipboard.writeText("yang9426@gmail.com");
     } catch {}
-    setCopied(key);
-    setTimeout(() => setCopied(""), 1500);
+    setCopied(true);
+    setTimeout(() => setCopied(false), 1500);
   };
 
   return (
@@ -85,60 +90,74 @@ export function SupportButton() {
         ♥ Support
       </button>
 
-      {open ? (
-        <div
-          className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-sm"
-          onClick={() => setOpen(false)}
-        >
-          <div
-            className="bg-zinc-900 border border-zinc-700 rounded-2xl p-5 w-[320px] shadow-2xl"
-            onClick={(e) => e.stopPropagation()}
-          >
-            <div className="flex items-center justify-between mb-4">
-              <div className="text-base font-bold text-zinc-100">Support ♥</div>
-              <button
-                onClick={() => setOpen(false)}
-                className="w-7 h-7 rounded-lg text-zinc-500 hover:text-white hover:bg-zinc-800 transition-colors"
-                title="닫기"
+      {/* Portal로 body에 렌더 — 헤더의 backdrop-blur가 fixed 기준점을 바꾸는 문제 회피 */}
+      {open && typeof document !== "undefined"
+        ? createPortal(
+            <div
+              className="fixed inset-0 z-[100] flex items-center justify-center bg-black/70 backdrop-blur-sm p-4"
+              onClick={() => setOpen(false)}
+            >
+              <div
+                className="bg-zinc-900 border border-zinc-700 rounded-2xl p-5 w-[340px] max-w-[92vw] shadow-2xl"
+                onClick={(e) => e.stopPropagation()}
               >
-                ✕
-              </button>
-            </div>
+                <div className="flex items-center justify-between mb-4">
+                  <div className="text-base font-bold text-zinc-100">Support ♥</div>
+                  <button
+                    onClick={() => setOpen(false)}
+                    className="w-7 h-7 rounded-lg text-zinc-500 hover:text-white hover:bg-zinc-800 transition-colors"
+                    title="닫기"
+                  >
+                    ✕
+                  </button>
+                </div>
 
-            {/* Venmo */}
-            <button
-              onClick={() => copy("@Seung-Yang-19", "venmo")}
-              className="w-full flex items-center gap-3 rounded-xl border border-zinc-800 bg-zinc-950/60 px-4 py-3.5 hover:bg-zinc-800/60 transition-colors"
-            >
-              <VenmoMark />
-              <span className="text-sm text-zinc-200">@Seung-Yang-19</span>
-              {copied === "venmo" ? (
-                <span className="ml-auto text-[11px] text-emerald-400">복사됨 ✓</span>
-              ) : (
-                <span className="ml-auto text-[10px] text-zinc-600">탭하여 복사</span>
-              )}
-            </button>
+                {/* Venmo */}
+                <a
+                  href="https://venmo.com/u/Seung-Yang-19"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="w-full flex items-center gap-3 rounded-xl border border-zinc-800 bg-zinc-950/60 px-4 py-3.5 hover:bg-zinc-800/60 transition-colors"
+                >
+                  <VenmoMark />
+                  <span className="text-sm text-zinc-200">@Seung-Yang-19</span>
+                  <span className="ml-auto text-[10px] text-zinc-600">열기 ↗</span>
+                </a>
 
-            {/* PayPal */}
-            <button
-              onClick={() => copy("yang9426@hotmail.com", "paypal")}
-              className="w-full flex items-center gap-3 rounded-xl border border-zinc-800 bg-zinc-950/60 px-4 py-3.5 hover:bg-zinc-800/60 transition-colors mt-2.5"
-            >
-              <PayPalMark />
-              <span className="text-sm text-zinc-200">yang9426@hotmail.com</span>
-              {copied === "paypal" ? (
-                <span className="ml-auto text-[11px] text-emerald-400">복사됨 ✓</span>
-              ) : (
-                <span className="ml-auto text-[10px] text-zinc-600">탭하여 복사</span>
-              )}
-            </button>
+                {/* PayPal */}
+                <a
+                  href="https://paypal.me/SeungHoYang"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="w-full flex items-center gap-3 rounded-xl border border-zinc-800 bg-zinc-950/60 px-4 py-3.5 hover:bg-zinc-800/60 transition-colors mt-2.5"
+                >
+                  <PayPalMark />
+                  <span className="text-sm text-zinc-200">yang9426@hotmail.com</span>
+                  <span className="ml-auto text-[10px] text-zinc-600">열기 ↗</span>
+                </a>
 
-            <div className="text-[11px] text-zinc-600 text-center mt-4">
-              감사합니다 — 연습 머신이 계속 돌아가게 해줍니다 🎵
-            </div>
-          </div>
-        </div>
-      ) : null}
+                {/* Zelle — 클릭하면 이메일 복사 */}
+                <button
+                  onClick={copyZelle}
+                  className="w-full flex items-center gap-3 rounded-xl border border-zinc-800 bg-zinc-950/60 px-4 py-3.5 hover:bg-zinc-800/60 transition-colors mt-2.5"
+                >
+                  <ZelleMark />
+                  <span className="text-sm text-zinc-200">yang9426@gmail.com</span>
+                  {copied ? (
+                    <span className="ml-auto text-[11px] text-emerald-400 shrink-0">복사됨 ✓</span>
+                  ) : (
+                    <span className="ml-auto text-[10px] text-zinc-600 shrink-0">탭하여 복사</span>
+                  )}
+                </button>
+
+                <div className="text-[11px] text-zinc-600 text-center mt-4">
+                  감사합니다 — 연습 머신이 계속 돌아가게 해줍니다 🎵
+                </div>
+              </div>
+            </div>,
+            document.body,
+          )
+        : null}
     </>
   );
 }

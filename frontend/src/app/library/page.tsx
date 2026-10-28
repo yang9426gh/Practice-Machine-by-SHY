@@ -220,7 +220,6 @@ export default function LibraryPage() {
     <main className="min-h-screen bg-black text-white pb-24">
       <div className="sticky top-0 z-10 border-b border-zinc-800 bg-zinc-950/90 backdrop-blur">
         <div className="max-w-6xl mx-auto px-4 py-4 flex items-center gap-3 relative">
-          <SupportButton />
           <button onClick={() => router.push("/")} className="px-3 py-2 rounded-lg border border-zinc-700 text-sm">
             Back
           </button>
@@ -228,6 +227,10 @@ export default function LibraryPage() {
           {/* 브랜드 헤더 — 상단 중앙 */}
           <div className="absolute left-1/2 -translate-x-1/2 hidden sm:block">
             <BrandHeader compact />
+          </div>
+          {/* Support 버튼 — 중앙 로고 바로 왼쪽 (넓은 화면에서만) */}
+          <div className="absolute right-1/2 mr-[152px] top-1/2 -translate-y-1/2 hidden md:block">
+            <SupportButton />
           </div>
           <div className="flex-1" />
 
