@@ -2,7 +2,7 @@
 
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
-import { BrandHeader } from "../../components/Brand";
+import { BrandHeader, SupportButton } from "../../components/Brand";
 
 const BACKEND = process.env.NEXT_PUBLIC_BACKEND_URL || (typeof window !== "undefined" ? window.location.origin : "http://localhost:8011");
 
@@ -220,6 +220,7 @@ export default function LibraryPage() {
     <main className="min-h-screen bg-black text-white pb-24">
       <div className="sticky top-0 z-10 border-b border-zinc-800 bg-zinc-950/90 backdrop-blur">
         <div className="max-w-6xl mx-auto px-4 py-4 flex items-center gap-3 relative">
+          <SupportButton />
           <button onClick={() => router.push("/")} className="px-3 py-2 rounded-lg border border-zinc-700 text-sm">
             Back
           </button>

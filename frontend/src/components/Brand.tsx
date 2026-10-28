@@ -1,3 +1,7 @@
+"use client";
+
+import { useState } from "react";
+
 export function CassetteLogo({ size = 26 }: { size?: number }) {
   return (
     <svg width={size} height={size} viewBox="0 0 64 64" aria-hidden="true">
@@ -43,5 +47,98 @@ export function BrandHeader({ compact = false }: { compact?: boolean }) {
         </div>
       </div>
     </div>
+  );
+}
+
+function VenmoMark() {
+  return <span className="font-extrabold text-lg tracking-tight text-[#008CFF]">venmo</span>;
+}
+
+function PayPalMark() {
+  return (
+    <span className="font-extrabold italic text-lg tracking-tight">
+      <span className="text-[#0f5fbf]">Pay</span>
+      <span className="text-[#009CDE]">Pal</span>
+    </span>
+  );
+}
+
+export function SupportButton() {
+  const [open, setOpen] = useState(false);
+  const [copied, setCopied] = useState("");
+
+  const copy = async (text: string, key: string) => {
+    try {
+      await navigator.clipboard.writeText(text);
+    } catch {}
+    setCopied(key);
+    setTimeout(() => setCopied(""), 1500);
+  };
+
+  return (
+    <>
+      <button
+        onClick={() => setOpen(true)}
+        className="px-2.5 py-1.5 rounded-lg border border-zinc-700 text-xs text-zinc-300 hover:bg-zinc-800 hover:text-white transition-colors shrink-0"
+        title="Support"
+      >
+        ♥ Support
+      </button>
+
+      {open ? (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-sm"
+          onClick={() => setOpen(false)}
+        >
+          <div
+            className="bg-zinc-900 border border-zinc-700 rounded-2xl p-5 w-[320px] shadow-2xl"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="flex items-center justify-between mb-4">
+              <div className="text-base font-bold text-zinc-100">Support ♥</div>
+              <button
+                onClick={() => setOpen(false)}
+                className="w-7 h-7 rounded-lg text-zinc-500 hover:text-white hover:bg-zinc-800 transition-colors"
+                title="닫기"
+              >
+                ✕
+              </button>
+            </div>
+
+            {/* Venmo */}
+            <button
+              onClick={() => copy("@Seung-Yang-19", "venmo")}
+              className="w-full flex items-center gap-3 rounded-xl border border-zinc-800 bg-zinc-950/60 px-4 py-3.5 hover:bg-zinc-800/60 transition-colors"
+            >
+              <VenmoMark />
+              <span className="text-sm text-zinc-200">@Seung-Yang-19</span>
+              {copied === "venmo" ? (
+                <span className="ml-auto text-[11px] text-emerald-400">복사됨 ✓</span>
+              ) : (
+                <span className="ml-auto text-[10px] text-zinc-600">탭하여 복사</span>
+              )}
+            </button>
+
+            {/* PayPal */}
+            <button
+              onClick={() => copy("yang9426@hotmail.com", "paypal")}
+              className="w-full flex items-center gap-3 rounded-xl border border-zinc-800 bg-zinc-950/60 px-4 py-3.5 hover:bg-zinc-800/60 transition-colors mt-2.5"
+            >
+              <PayPalMark />
+              <span className="text-sm text-zinc-200">yang9426@hotmail.com</span>
+              {copied === "paypal" ? (
+                <span className="ml-auto text-[11px] text-emerald-400">복사됨 ✓</span>
+              ) : (
+                <span className="ml-auto text-[10px] text-zinc-600">탭하여 복사</span>
+              )}
+            </button>
+
+            <div className="text-[11px] text-zinc-600 text-center mt-4">
+              감사합니다 — 연습 머신이 계속 돌아가게 해줍니다 🎵
+            </div>
+          </div>
+        </div>
+      ) : null}
+    </>
   );
 }

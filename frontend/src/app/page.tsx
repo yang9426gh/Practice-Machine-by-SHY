@@ -3,7 +3,7 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { Play, Pause, ChevronUp, ChevronDown, Maximize, Minimize } from "lucide-react";
-import { BrandHeader } from "../components/Brand";
+import { BrandHeader, SupportButton } from "../components/Brand";
 
 const BACKEND = process.env.NEXT_PUBLIC_BACKEND_URL || (typeof window !== "undefined" ? window.location.origin : "http://localhost:8011");
 
@@ -1974,6 +1974,8 @@ export default function KaraokePage() {
     <main className="relative flex flex-col h-screen bg-black text-white overflow-hidden">
       <div className="p-4 border-b border-zinc-800 bg-zinc-950">
         <div className="flex gap-2 items-center relative">
+          {/* Support 버튼 — 로고 왼쪽 */}
+          <SupportButton />
           {/* 브랜드 헤더 — 상단 중앙 */}
           <div className="absolute left-1/2 -translate-x-1/2">
             <BrandHeader />
