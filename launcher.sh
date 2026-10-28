@@ -76,7 +76,13 @@ DATA_DIR="${HOLY_DATA_DIR:-$ROOT/backend/data}"
 mkdir -p "$DATA_DIR"
 export HOLY_DATA_DIR="$DATA_DIR"
 cd "$ROOT/backend"
-nohup "$ROOT/backend/venv/bin/python" -m uvicorn main:app --host 0.0.0.0 --port "$PORT" \
+# settings.env 에 저장된 바인딩(외부접속 토글 결과) 존중 — 없으면 127.0.0.1 (이 컴퓨터 전용)
+if [ -f settings.env ]; then
+  SAVED_HOST=$(grep -E '^HOLY_HOST=' settings.env | tail -1 | cut -d'=' -f2- | tr -d '[:space:]')
+  [ -n "$SAVED_HOST" ] && export HOLY_HOST="$SAVED_HOST"
+fi
+export HOLY_HOST="${HOLY_HOST:-127.0.0.1}"
+nohup "$ROOT/backend/venv/bin/python" -m uvicorn main:app --host "$HOLY_HOST" --port "$PORT" \
   >"$ROOT/backend/run.log" 2>&1 &
 echo $! > "$ROOT/backend/run.pid"
 

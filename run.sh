@@ -4,7 +4,18 @@ set -euo pipefail
 cd "$(dirname "${BASH_SOURCE[0]}")"
 ROOT="$(pwd)"
 PORT="${HOLY_PORT:-8011}"
-HOST="${HOLY_HOST:-0.0.0.0}"   # 0.0.0.0 = 같은 네트워크 다른 기기 접속 허용 (localhost로 바꾸면 이 기기 전용)
+
+# 호스트 바인딩: settings.env 의 HOLY_HOST 값 우선 (없으면 127.0.0.1 = 이 컴퓨터 전용)
+#  - 127.0.0.1 : 외부 기기 접속 불가 (기본값, 안전)
+#  - 0.0.0.0   : 같은 와이파이 폰/태블릿 접속 허용 ("외부접속 전환.app"으로 변경됨)
+# 환경변수 HOLY_HOST가 settings.env보다 우선 (개발자 수동 지정용)
+SETTINGS="$ROOT/backend/settings.env"
+if [ -f "$SETTINGS" ] && [ -z "${HOLY_HOST:-}" ]; then
+  # settings.env 의 HOLY_HOST=... 줄만 읽음 (주석/공백 무시)
+  SAVED_HOST=$(grep -E '^HOLY_HOST=' "$SETTINGS" | tail -1 | cut -d'=' -f2- | tr -d '[:space:]')
+  [ -n "$SAVED_HOST" ] && export HOLY_HOST="$SAVED_HOST"
+fi
+HOST="${HOLY_HOST:-127.0.0.1}"
 
 # 프론트 빌드물 확인
 if [ ! -f "$ROOT/frontend/out/index.html" ]; then
@@ -23,7 +34,7 @@ fi
 DATA_DIR="${HOLY_DATA_DIR:-$ROOT/backend/data}"
 mkdir -p "$DATA_DIR"
 
-echo "🎤 Holy Karaoke Stems 시작 → http://localhost:$PORT"
+echo "🎤 Holy Karaoke Stems 시작 → http://localhost:$PORT (바인딩: $HOST)"
 cd "$ROOT/backend"
 source venv/bin/activate
 

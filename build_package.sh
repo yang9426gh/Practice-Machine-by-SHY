@@ -14,7 +14,7 @@
 set -euo pipefail
 cd "$(dirname "${BASH_SOURCE[0]}")"
 ROOT="$(pwd)"
-VERSION="1.3.1"
+VERSION="1.4.0"
 STAGE="$(mktemp -d)"
 DMG_DIR="$STAGE/dmg"
 APPDIR="$DMG_DIR/Holy Karaoke Stems"   # 배포 폴더 = 프로젝트 루트 (앱들이 그 안에 위치)
@@ -71,6 +71,7 @@ make_app "Holy Karaoke Stems" "launcher.sh" "start"
 make_app "Holy Karaoke Stems 종료" "stop.sh" "stop"
 make_app "Holy Karaoke Stems 제거" "uninstall.sh" "uninstall"
 make_app "Holy Karaoke Stems 로그" "view_log.sh" "log"
+make_app "Holy Karaoke Stems 외부접속 전환" "toggle_external.sh" "toggle"
 
 cat > "$APPDIR/! 먼저 읽으세요.txt" <<'EOF'
 🎤 Holy Karaoke Stems — 설치/사용 안내
@@ -81,16 +82,23 @@ cat > "$APPDIR/! 먼저 읽으세요.txt" <<'EOF'
 2. 폴더 안에서 "Holy Karaoke Stems" 앱을 더블클릭하세요.
    · 첫 실행: 필요한 구성요소를 자동 내려받아 설치합니다 (인터넷 필요, 몇 분 소요).
    · 이후 실행: 서버가 켜지고 브라우저가 자동으로 열립니다 (http://localhost:8011).
-   · 같은 네트워크 기기(폰·패드 등)에서는 http://<이 맥의 IP>:8011 로 접속.
 
 3. 서버 끄기:  "Holy Karaoke Stems 종료" 앱 더블클릭
 4. 완전 삭제:  "Holy Karaoke Stems 제거" 앱 더블클릭 (곡 데이터 포함 삭제)
 5. 에러 확인:  "Holy Karaoke Stems 로그" 앱 더블클릭 — 서버 로그가 콘솔 앱에서 실시간 표시됩니다
    (에러가 났으면 이 로그를 복사해서 공유하면 됩니다)
 
+6. 폰·태블릿에서 부르기: "Holy Karaoke Stems 외부접속 전환" 앱 더블클릭
+   · 한 번 실행: 외부접속 켜짐 — 같은 와이파이 기기에서 http://<이 맥 IP>:8011 접속 (IP는 팝업에 표시)
+   · 다시 한 번 실행: 외부접속 꺼짐 — 이 컴퓨터에서만 접속 (기본 상태)
+
 ※ 처음 열 때 "확인되지 않은 개발자" 경고가 뜨면 (macOS 보안 정책):
    시스템 설정 → 개인정보 보호 및 보안 → 맨 아래 "확인 없이 열기" 버튼 클릭
    → 이후부터는 더블클릭만으로 실행됩니다.
+
+※ 저작권 안내: 본 프로그램은 개인 연습 목적의 도구입니다.
+   사용자는 각자 관할 법률과 플랫폼 약관을 준수할 책임이 있으며,
+   다운로드한 음원의 권리는 원 저작권자에게 있습니다. 영리 목적으로 사용하지 마세요.
 EOF
 cp "$APPDIR/! 먼저 읽으세요.txt" "$DMG_DIR/설치 안내.txt"
 
