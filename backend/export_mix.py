@@ -9,11 +9,12 @@ def _ffmpeg() -> str:
     return ffmpeg_bin()
 
 
-def build_mix_args(stems: Dict[str, str], gains: Dict[str, float]) -> Tuple[List[str], str, str]:
+def build_mix_args(stems: Dict[str, str], gains: Dict[str, float], *, input_offset: int = 0) -> Tuple[List[str], str, str]:
     """Build ffmpeg inputs + filter_complex for mixing stems.
 
     Returns (input_args, filter_complex, audio_out_label).
     Shared by Export MP3 (file output) and Export Video (mux into video).
+    input_offset: 영상 등 다른 입력이 앞에 붙을 때 스템 입력 시작 인덱스 (예: 영상이 input 0이면 1).
     """
     # Keep a stable ordering
     names = sorted(stems.keys())
@@ -29,7 +30,7 @@ def build_mix_args(stems: Dict[str, str], gains: Dict[str, float]) -> Tuple[List
         g = float(gains.get(nm, 1.0))
         if g < 0:
             g = 0.0
-        parts.append(f"[{i}:a]volume={g}[a{i}]")
+        parts.append(f"[{i + input_offset}:a]volume={g}[a{i}]")
         labels.append(f"[a{i}]")
 
     amix = "".join(labels) + f"amix=inputs={len(labels)}:normalize=0[aout]"

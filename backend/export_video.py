@@ -236,7 +236,8 @@ def export_video(
     os.makedirs(os.path.dirname(out_path), exist_ok=True)
 
     ff = _ffmpeg()
-    mix_inputs, mix_fc, aout = build_mix_args(stems, gains)
+    # 영상이 input 0이므로 스템 입력은 1부터 — [0:a](영상 원본 오디오)가 믹스에 섞이지 않게 함
+    mix_inputs, mix_fc, aout = build_mix_args(stems, gains, input_offset=1)
 
     ass_arg = ass_path.replace("\\", "/").replace(":", "\\:")
     fonts_dirs = "/System/Library/Fonts:/System/Library/Fonts/Supplemental".replace(":", "\\:")
