@@ -1,6 +1,7 @@
 "use client";
 
 import React, { useEffect, useMemo, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import { useRouter } from "next/navigation";
 import { BrandHeader, SupportButton } from "../../components/Brand";
 import { LayoutGrid, List } from "lucide-react";
@@ -235,6 +236,100 @@ export default function LibraryPage() {
     await refresh();
   };
 
+  // ---------- 내용 뷰어 (읽기 전용 — 배지 클릭 → 가사/코드 원문 보기·복사) ----------
+  const [viewer, setViewer] = useState<{ preset: Preset; kind: "lyrics" | "chords" } | null>(null);
+  const [viewerText, setViewerText] = useState("");
+  const [viewerLoading, setViewerLoading] = useState(false);
+
+  const closeViewer = () => setViewer(null);
+
+  const openContentViewer = async (p: Preset, kind: "lyrics" | "chords") => {
+    setViewer({ preset: p, kind });
+    setViewerText("");
+    setViewerLoading(true);
+    try {
+      if (!p.video_id) {
+        setViewerText("(video ID 없음 — 내용을 불러올 수 없습니다)");
+        return;
+      }
+      const r = await fetch(`${BACKEND}/${kind}/${encodeURIComponent(p.video_id)}`);
+      if (r.ok) {
+        const j = await r.json();
+        setViewerText(j.lrc || "(저장된 내용이 없습니다)");
+      } else {
+        setViewerText("(저장된 내용이 없습니다)");
+      }
+    } catch {
+      setViewerText("(불러오기 실패 — 서버 확인)");
+    } finally {
+      setViewerLoading(false);
+    }
+  };
+
+  const copyViewerText = async () => {
+    if (!viewerText || viewerText.startsWith("(")) return;
+    try {
+      await navigator.clipboard.writeText(viewerText);
+      toast("복사됐습니다");
+    } catch {
+      // 비보안 컨텍스트(LAN IP 접속)에선 navigator.clipboard가 없음 → execCommand 폴백
+      try {
+        const ta = document.createElement("textarea");
+        ta.value = viewerText;
+        ta.style.position = "fixed";
+        ta.style.opacity = "0";
+        document.body.appendChild(ta);
+        ta.select();
+        document.execCommand("copy");
+        document.body.removeChild(ta);
+        toast("복사됐습니다");
+      } catch {
+        toast("복사 실패 — 텍스트를 직접 선택해 복사해 주세요");
+      }
+    }
+  };
+
+  // Esc로 닫기
+  useEffect(() => {
+    if (!viewer) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") closeViewer();
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [viewer]);
+
+  // 가사/코드 배지 (클릭 → 읽기 전용 뷰어) — 카드/리스트 뷰 공용
+  const contentBadge = (p: Preset, kind: "lyrics" | "chords") => {
+    const has = kind === "lyrics" ? p.has_lyrics : p.has_chords;
+    if (!has) return null;
+    return (
+      <div
+        role="button"
+        tabIndex={0}
+        onClick={(e) => {
+          e.stopPropagation();
+          void openContentViewer(p, kind);
+        }}
+        onKeyDown={(e) => {
+          if (e.key === "Enter" || e.key === " ") {
+            e.preventDefault();
+            e.stopPropagation();
+            void openContentViewer(p, kind);
+          }
+        }}
+        title={kind === "lyrics" ? "가사 내용 보기" : "코드 내용 보기"}
+        className={`text-[11px] px-2 py-0.5 rounded-full cursor-pointer hover:brightness-150 ${
+          kind === "lyrics"
+            ? "border border-violet-800/60 bg-violet-950/30 text-violet-300"
+            : "border border-emerald-800/60 bg-emerald-950/30 text-emerald-300"
+        }`}
+      >
+        {kind === "lyrics" ? "가사" : "코드"}
+      </div>
+    );
+  };
+
   const visibleQueue = queueItems.filter((q) => q.status !== "completed");
 
   return (
@@ -411,12 +506,8 @@ export default function LibraryPage() {
                         {p.key_tonic}{p.key_mode === "minor" ? "m" : "M"}
                       </div>
                     ) : null}
-                    {p.has_lyrics ? (
-                      <div className="text-[11px] px-2 py-0.5 rounded-full border border-violet-800/60 bg-violet-950/30 text-violet-300">가사</div>
-                    ) : null}
-                    {p.has_chords ? (
-                      <div className="text-[11px] px-2 py-0.5 rounded-full border border-emerald-800/60 bg-emerald-950/30 text-emerald-300">코드</div>
-                    ) : null}
+                    {contentBadge(p, "lyrics")}
+                    {contentBadge(p, "chords")}
                   </div>
                 </div>
               </button>
@@ -462,12 +553,8 @@ export default function LibraryPage() {
                         {p.key_tonic}{p.key_mode === "minor" ? "m" : "M"}
                       </div>
                     ) : null}
-                    {p.has_lyrics ? (
-                      <div className="text-[11px] px-2 py-0.5 rounded-full border border-violet-800/60 bg-violet-950/30 text-violet-300">가사</div>
-                    ) : null}
-                    {p.has_chords ? (
-                      <div className="text-[11px] px-2 py-0.5 rounded-full border border-emerald-800/60 bg-emerald-950/30 text-emerald-300">코드</div>
-                    ) : null}
+                    {contentBadge(p, "lyrics")}
+                    {contentBadge(p, "chords")}
                   </div>
                 </div>
               </button>
@@ -497,6 +584,55 @@ export default function LibraryPage() {
           {toastMsg}
         </div>
       ) : null}
+
+      {/* 내용 뷰어 (읽기 전용) — 헤더 backdrop-blur 함정 회피 위해 portal로 렌더 */}
+      {viewer
+        ? createPortal(
+            <div
+              className="fixed inset-0 z-[100] flex items-center justify-center bg-black/70 p-4"
+              onMouseDown={(e) => {
+                if (e.target === e.currentTarget) closeViewer();
+              }}
+            >
+              <div className="bg-zinc-950 border border-zinc-800 rounded-2xl p-5 w-full max-w-2xl space-y-3">
+                <div className="flex items-center justify-between gap-3">
+                  <div className="min-w-0">
+                    <div className="text-sm font-semibold text-zinc-100 truncate">
+                      {viewer.preset.title || viewer.preset.name || viewer.preset.video_id}
+                    </div>
+                    <div className="text-[11px] text-zinc-500">
+                      {viewer.kind === "lyrics" ? "가사 (읽기 전용)" : "코드 (읽기 전용)"}
+                    </div>
+                  </div>
+                  <div className="flex items-center gap-2 shrink-0">
+                    <button
+                      onClick={copyViewerText}
+                      className="text-xs px-3 py-1.5 rounded-lg border border-zinc-700 hover:bg-zinc-800"
+                    >
+                      복사
+                    </button>
+                    <button
+                      onClick={closeViewer}
+                      className="w-7 h-7 rounded-lg text-zinc-500 hover:text-white hover:bg-zinc-800"
+                      title="닫기"
+                    >
+                      ✕
+                    </button>
+                  </div>
+                </div>
+                <textarea
+                  readOnly
+                  value={viewerText}
+                  className="w-full h-80 bg-zinc-900 border border-zinc-800 rounded-xl p-3 font-mono text-xs text-zinc-200 leading-relaxed resize-none focus:outline-none"
+                />
+                <div className="text-[11px] text-zinc-500">
+                  타임스탬프 포함 원문입니다. 복사 버튼 또는 텍스트 클릭 후 Cmd+A → Cmd+C로 복사할 수 있어요.
+                </div>
+              </div>
+            </div>,
+            document.body
+          )
+        : null}
     </main>
   );
 }
