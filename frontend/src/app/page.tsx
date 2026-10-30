@@ -4,6 +4,7 @@ import React, { useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { Play, Pause, ChevronUp, ChevronDown, Maximize, Minimize } from "lucide-react";
 import { BrandHeader, SupportButton } from "../components/Brand";
+import { busForStem, type BusName } from "../lib/mixRouting";
 
 const BACKEND = process.env.NEXT_PUBLIC_BACKEND_URL || (typeof window !== "undefined" ? window.location.origin : "http://localhost:8011");
 
@@ -968,22 +969,14 @@ export default function KaraokePage() {
 
       // click track removed
 
-      if (mixMode.kind === "master") {
-        // vocals direct -> master, others -> instrumental bus
-        if (stem === "vocals") stemGainsRef.current[stem].connect(masterGainRef.current!);
-        else stemGainsRef.current[stem].connect(instGainRef.current!);
-      } else if (mixMode.kind === "vocal") {
-        if (stem === "vocals") stemGainsRef.current[stem].connect(focusBusGainRef.current!);
-        else stemGainsRef.current[stem].connect(otherBusGainRef.current!);
-      } else if (mixMode.kind === "instrument") {
-        if (stem === "vocals") stemGainsRef.current[stem].connect(vocalsBusGainRef.current!);
-        else if (stem === mixMode.instrument) stemGainsRef.current[stem].connect(focusBusGainRef.current!);
-        else stemGainsRef.current[stem].connect(otherBusGainRef.current!);
-      } else {
-        // select screen: default to master routing
-        if (stem === "vocals") stemGainsRef.current[stem].connect(masterGainRef.current!);
-        else stemGainsRef.current[stem].connect(instGainRef.current!);
-      }
+      const busName = busForStem(stem, mixMode);
+      const bus =
+        busName === "master" ? masterGainRef.current
+        : busName === "inst" ? instGainRef.current
+        : busName === "vocalsBus" ? vocalsBusGainRef.current
+        : busName === "focusBus" ? focusBusGainRef.current
+        : otherBusGainRef.current;
+      stemGainsRef.current[stem].connect(bus!);
     }
 
     // Create fresh sources per stem (BufferSource is one-shot)
@@ -1227,6 +1220,34 @@ export default function KaraokePage() {
     const pct = Math.round((done / totalWeight) * 100);
     return Math.max(0, Math.min(99, pct));
   }, [stemOrder.join("|"), stemLoad]);
+
+  // Re-wire stems when mode changes mid-playback — without this, faders for
+  // buses the stems are NOT connected to do nothing until restart (real bug:
+  // "악기 모드에서 보컬 페이더를 내려도 응답 없음"). Web Audio allows hot
+  // disconnect/connect; playback is unaffected.
+  const applyBusWiring = React.useCallback(() => {
+    const ctx = audioCtxRef.current;
+    if (!ctx) return;
+    for (const stem of stemOrder) {
+      const g = stemGainsRef.current[stem];
+      if (!g) continue;
+      try {
+        g.disconnect();
+      } catch {}
+      const busName: BusName = busForStem(stem, mixMode);
+      const bus =
+        busName === "master" ? masterGainRef.current
+        : busName === "inst" ? instGainRef.current
+        : busName === "vocalsBus" ? vocalsBusGainRef.current
+        : busName === "focusBus" ? focusBusGainRef.current
+        : otherBusGainRef.current;
+      if (bus) g.connect(bus);
+    }
+  }, [mixMode, stemOrder]);
+
+  useEffect(() => {
+    applyBusWiring();
+  }, [applyBusWiring]);
 
   // Apply gains
   useEffect(() => {
