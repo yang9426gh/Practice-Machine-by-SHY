@@ -113,12 +113,12 @@ def build_ass(
     lyric_tl = _timeline(lyric_lines)
 
     # --- 스타일 (PlayRes = 실제 영상 해상도) ---
-    chord_fs = max(24, round(height * 0.052))
-    lyric_fs = max(16, round(height * 0.040))
-    outline = max(2, round(height * 0.0035))
+    chord_fs = max(24, round(height * 0.052)) + 3
+    lyric_fs = max(16, round(height * 0.040)) + 3
+    outline = max(3, round(height * 0.0055))  # 검은 외곽선 — 영상 위에서 자막 구분용
     # 다음 라인 미리보기 (앱 fullscreen 모드처럼 현재+다음 동시 표시)
-    chord_next_fs = max(14, round(chord_fs * 0.55))
-    lyric_next_fs = max(12, round(lyric_fs * 0.70))
+    chord_next_fs = max(14, round(chord_fs * 0.55)) + 3
+    lyric_next_fs = max(12, round(lyric_fs * 0.70)) + 3
     mv_chord = round(height * 0.05)  # 상단 ~5%
     mv_chord_next = round(height * 0.115)  # 현재 코드 아래 (fs 간격)
     mv_lyric = round(height * (0.175 if chord_lines else 0.10))  # 코드 블록 아래, 상단 1/3 안
@@ -134,9 +134,9 @@ ScaledBorderAndShadow: yes
 [V4+ Styles]
 Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding
 Style: Chord,{font_name},{chord_fs},&H00FFFFFF,&H006E6E6E,&H00000000,&H00000000,1,0,0,0,100,100,0,0,1,{outline},0,8,60,60,{mv_chord},1
-Style: Lyric,{font_name},{lyric_fs},&H00F2F2F2,&H00000000,&H00000000,&H00000000,0,0,0,0,100,100,0,0,1,{max(2, outline - 1)},0,8,60,60,{mv_lyric},1
-Style: ChordNext,{font_name},{chord_next_fs},&H00969696,&H006E6E6E,&H00000000,&H00000000,0,0,0,0,100,100,0,0,1,{max(2, outline - 1)},0,8,60,60,{mv_chord_next},1
-Style: LyricNext,{font_name},{lyric_next_fs},&H00AAAAAA,&H00000000,&H00000000,&H00000000,0,0,0,0,100,100,0,0,1,{max(2, outline - 1)},0,8,60,60,{mv_lyric_next},1
+Style: Lyric,{font_name},{lyric_fs},&H00F2F2F2,&H00000000,&H00000000,&H00000000,0,0,0,0,100,100,0,0,1,{outline},0,8,60,60,{mv_lyric},1
+Style: ChordNext,{font_name},{chord_next_fs},&H00969696,&H006E6E6E,&H00000000,&H00000000,0,0,0,0,100,100,0,0,1,{outline},0,8,60,60,{mv_chord_next},1
+Style: LyricNext,{font_name},{lyric_next_fs},&H00AAAAAA,&H00000000,&H00000000,&H00000000,0,0,0,0,100,100,0,0,1,{outline},0,8,60,60,{mv_lyric_next},1
 
 [Events]
 Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
