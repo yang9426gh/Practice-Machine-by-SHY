@@ -14,7 +14,7 @@
 set -euo pipefail
 cd "$(dirname "${BASH_SOURCE[0]}")"
 ROOT="$(pwd)"
-VERSION="1.4.1"
+VERSION="1.4.2"
 STAGE="$(mktemp -d)"
 DMG_DIR="$STAGE/dmg"
 APPDIR="$DMG_DIR/Practice Machine by SHY"   # 배포 폴더 = 프로젝트 루트 (앱들이 그 안에 위치)
@@ -54,6 +54,10 @@ EOF
   if [ -f "$ROOT/assets/app.icns" ]; then
     cp "$ROOT/assets/app.icns" "$app/Contents/Resources/app.icns"
   fi
+  # adhoc 서명 — 무서명 .app은 최신 macOS(15+)에서 더블클릭 시 아무 반응 없이
+  # 차단될 수 있음 (다른 맥 설치 실패의 실제 원인). 인터넷 가능 환경이면
+  # Gatekeeper 심사도 통과할 수 있는 최소 조건을 만든다.
+  codesign --force --deep --sign - "$app" >/dev/null 2>&1 || true
 }
 
 echo "📦 프로젝트 복사..."
@@ -93,8 +97,16 @@ cat > "$APPDIR/! 먼저 읽으세요.txt" <<'EOF'
    · 다시 한 번 실행: 외부접속 꺼짐 — 이 컴퓨터에서만 접속 (기본 상태)
 
 ※ 처음 열 때 "확인되지 않은 개발자" 경고가 뜨면 (macOS 보안 정책):
-   시스템 설정 → 개인정보 보호 및 보안 → 맨 아래 "확인 없이 열기" 버튼 클릭
-   → 이후부터는 더블클릭만으로 실행됩니다.
+   · macOS 14 이하: 시스템 설정 → 개인정보 보호 및 보안 → 맨 아래 "확인 없이 열기" 클릭
+   · macOS 15 이상에서 경고에 "열기" 버튼이 없거나 아무 반응이 없으면:
+     1) 응용프로그램 폴더 등으로 옮긴 뒤
+     2) 터미널을 열어 아래 한 줄 실행 (폴더 경로를 드래그하면 편함):
+        xattr -dr com.apple.quarantine "앱 폴더 경로"
+     → 이후부터는 더블클릭만으로 실행됩니다.
+   (이 작업은 1회만 필요합니다)
+
+※ 최초 실행 시 인터넷이 연결되어 있어야 하며, Python 런타임(약 60MB)이 자동으로
+   내려받아집니다. 이 폴더 안에만 설치되므로 컴퓨터에 흔적이 남지 않습니다.
 
 ※ 저작권 안내: 본 프로그램은 개인 연습 목적의 도구입니다.
    사용자는 각자 관할 법률과 플랫폼 약관을 준수할 책임이 있으며,

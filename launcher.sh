@@ -1,12 +1,22 @@
 #!/usr/bin/env bash
 # Practice Machine by SHY — 원클릭 스마트 런처
-# .app 더블클릭 → 필요하면 자동 설치 → 서버 기동 → 브라우저 오픈
-#   환경: 최초 1회 venv+의존성 설치 (몇 분), 이후는 즉시 기동
+# .app 더블클릭 → 필요한 것 전부 자동 설치 → 서버 기동 → 브라우저 오픈
+#
+# v1.4.2:
+#   - 내장 Python 런타임 URL 복구 (이전 빌드는 URL이 손상돼 폴백 다운로드가 항상 실패)
+#   - node 없어도 자동 설치 (공식 tarball → runtime/node, 비밀번호 불필요)
+#     (yt-dlp의 YouTube JS challenge가 node 런타임을 요구 — 없으면 일부 영상 다운로드 실패)
+#   - 임시파일 경로 유니크화 (동시실행 충돌 방지)
+#
+# 모든 구성요소는 이 폴더 안에 설치됨 → 제거 시 폴더 삭제로 끝 (시스템 오염 없음)
 set -u
 cd "$(dirname "${BASH_SOURCE[0]}")"
 ROOT="$(pwd)"
 PORT="${HOLY_PORT:-8011}"
 LOG="$ROOT/launcher.log"
+PBS_TAG="20241016"           # python-build-standalone release tag
+NODE_VER="v22.14.0"          # LTS — 프론트 빌드물은 패키지에 포함되어 있어
+                             # node는 yt-dlp JS challenge 전용
 
 say() { osascript -e "display notification \"${1//\"/}\" with title \"Practice Machine by SHY\"" 2>/dev/null; }
 dialog() { osascript -e "display dialog \"${1//\"/}\" with title \"Practice Machine by SHY\" buttons {\"OK\"} default button 1 with icon note" >/dev/null 2>&1; }
@@ -16,6 +26,8 @@ export PATH="/opt/homebrew/bin:/usr/local/bin:$PATH"
 
 exec > >(tee -a "$LOG") 2>&1
 echo "=== $(date '+%F %T') launcher start ==="
+
+TMP_TGZ="$(mktemp -t pmdownload).tar.gz"
 
 # ---------- 1) 이미 실행 중이면 브라우저만 열고 끝 ----------
 if curl -s -o /dev/null --max-time 2 "http://127.0.0.1:$PORT/"; then
@@ -33,12 +45,13 @@ for c in "$ROOT/runtime/python/bin/python3" python3.13 python3.12 python3.11 pyt
 done
 
 if [ -z "$PY" ]; then
+  # python-build-standalone 폴백 (repo 내부에 설치 → self-contained 유지)
   echo "Python 3.10+ 없음 — 내장 런타임 다운로드 (1회, 약 60MB)"
   say "Python 런타임 다운로드 중... (1회)"
   ARC="aarch64"; [ "$(uname -m)" = "x86_64" ] && ARC="x86_64"
-  URL="https://github.com/astral-sh/python-build-standalone/releases/download/20241016/cpython-3.11.10+20241016-${ARC}-apple-darwin-install_only.tar.gz"
+  URL="https://github.com/astral-sh/python-build-standalone/releases/download/${PBS_TAG}/cpython-3.11.10%2B${PBS_TAG}-${ARC}-apple-darwin-install_only.tar.gz"
   mkdir -p "$ROOT/runtime"
-  if curl -sL "$URL" -o /tmp/holy_py.tar.gz && tar -xzf /tmp/holy_py.tar.gz -C "$ROOT/runtime" 2>/dev/null; then
+  if curl -sL "$URL" -o "$TMP_TGZ" && tar -xzf "$TMP_TGZ" -C "$ROOT/runtime" 2>/dev/null; then
     PY="$ROOT/runtime/python/bin/python3"
     say "Python 런타임 준비 완료"
   else
@@ -48,7 +61,40 @@ if [ -z "$PY" ]; then
 fi
 echo "python: $PY ($("$PY" --version 2>&1))"
 
-# ---------- 3) 의존성 설치 (최초 1회) ----------
+# ---------- 3) node 확보 (yt-dlp JS challenge용; 프론트 빌드는 패키지에 포함) ----------
+NODE=""
+for c in node "$ROOT/runtime/node/bin/node" /opt/homebrew/bin/node /usr/local/bin/node; do
+  [ -x "$c" ] || command -v "$c" >/dev/null 2>&1 || continue
+  NODE="$c"; break
+done
+if [ -z "$NODE" ] && [ -d "$HOME/.nvm/versions/node" ]; then
+  newest=$(ls "$HOME/.nvm/versions/node" 2>/dev/null | sort -V | tail -1)
+  [ -n "$newest" ] && [ -x "$HOME/.nvm/versions/node/$newest/bin/node" ] && \
+    NODE="$HOME/.nvm/versions/node/$newest/bin/node"
+fi
+if [ -z "$NODE" ]; then
+  echo "node 없음 — 내장 node 다운로드 (1회, 약 25MB)"
+  say "node 런타임 다운로드 중... (1회)"
+  # 주의: nodejs.org tarball 이름은 arm64/x64 (aarch64/x86_64 아님!)
+  NARC="arm64"; [ "$(uname -m)" = "x86_64" ] && NARC="x64"
+  NURL="https://nodejs.org/dist/${NODE_VER}/node-${NODE_VER}-darwin-${NARC}.tar.gz"
+  mkdir -p "$ROOT/runtime"
+  if curl -sL "$NURL" -o "$TMP_TGZ" && tar -xzf "$TMP_TGZ" -C "$ROOT/runtime" 2>/dev/null; then
+    mv "$ROOT/runtime/node-${NODE_VER}-darwin-${NARC}" "$ROOT/runtime/node" 2>/dev/null
+    NODE="$ROOT/runtime/node/bin/node"
+    say "node 준비 완료"
+  else
+    # node는 필수는 아님 — 일부 영상(JS challenge)만 실패. 경고 후 계속.
+    echo "경고: node 다운로드 실패 — 일부 YouTube 영상이 다운로드되지 않을 수 있음"
+  fi
+fi
+echo "node: ${NODE:-(없음 — JS challenge 영상 제한)}"
+# 백엔드 processor.find_node()가 이 경로를 못 찾는 경우 대비해 환경변수로 힌트
+if [ -n "$NODE" ]; then
+  export HOLY_YTDLP_JS_RUNTIMES="node:$NODE"
+fi
+
+# ---------- 4) 의존성 설치 (최초 1회) ----------
 cd "$ROOT/backend"
 if [ ! -x venv/bin/python ]; then
   say "최초 설치 중... 몇 분 걸려요"
@@ -65,13 +111,13 @@ if ! python -c "import fastapi, demucs" >/dev/null 2>&1; then
   say "설치 완료!"
 fi
 
-# ---------- 4) 프론트 빌드물 확인 (패키지에 포함됨) ----------
+# ---------- 5) 프론트 빌드물 확인 (패키지에 포함됨) ----------
 if [ ! -f "$ROOT/frontend/out/index.html" ]; then
   dialog "프론트엔드 빌드물이 없습니다.\n패키지를 다시 다운로드해주세요."
   exit 1
 fi
 
-# ---------- 5) 서버 기동 ----------
+# ---------- 6) 서버 기동 ----------
 DATA_DIR="${HOLY_DATA_DIR:-$ROOT/backend/data}"
 mkdir -p "$DATA_DIR"
 export HOLY_DATA_DIR="$DATA_DIR"

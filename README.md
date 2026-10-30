@@ -23,11 +23,22 @@ YouTube 노래를 AI로 스템 분리(보컬/반주/드럼/베이스...)해서 �
 ./run.sh       # 백엔드+프론트 단일 프로세스 실행 → http://localhost:8011
 ```
 
-필요: macOS(Apple Silicon 권장), Python 3.10+, Node 18+ (빌드시에만)
+필요: macOS(Apple Silicon 권장) — **Python·Node·ffmpeg 전부 없어도 됩니다.**
+install.sh와 원클릭 앱이 없는 구성요소를 자동으로 설치합니다:
 
-- ffmpeg는 자동 다운로드(imageio-ffmpeg) — Homebrew 불필요
-- 같은 네트워크 기기에서 접속: `http://<이 Mac의 IP>:8011` (기본 `HOLY_HOST=0.0.0.0`)
-- 종료: `kill $(cat backend/run.pid)` (또는 포트 8011 프로세스 종료)
+| 구성요소 | 우선 사용 | 없으면 자동 설치 방법 |
+|---|---|---|
+| Python 3.10+ | 시스템/Homebrew/내장 runtime | Homebrew → 없으면 공식 standalone 런타임을 `runtime/`에 (비밀번호 불필요) |
+| Node 18+ | 시스템/Homebrew/nvm | Homebrew → 없으면 공식 tarball을 `runtime/node`에 (비밀번호 불필요) |
+| ffmpeg | — (불필요) | pip의 imageio-ffmpeg이 자동 제공 — yt-dlp에 경로까지 전달됨 |
+
+※ sudo가 필요한 Homebrew 자체 설치는 자동으로 해주지 않습니다 (비밀번호 입력 필요).
+  하지만 위 폴백 경로 때문에 brew 없는 맥에서도 설치가 끝까지 돌아갑니다.
+
+```bash
+./install.sh   # 최초 1회: (부족한 도구 자동 설치) + venv + 의존성 + 프론트 빌드
+./run.sh       # 백엔드+프론트 단일 프로세스 실행 → http://localhost:8011
+```
 
 ## 제거 (언인스톨)
 
@@ -88,7 +99,10 @@ YouTube 노래를 AI로 스템 분리(보컬/반주/드럼/베이스...)해서 �
 
 받는 쪽에서는:
 1. DMG 열기 → `Practice Machine by SHY` 폴더를 원하는 위치로 이동
-2. 폴더 안 `Practice Machine by SHY` 앱 더블클릭 — 첫 실행에 Python 런타임/의존성 자동 설치 후 브라우저 자동 오픈
-3. 처음 한 번 "확인되지 않은 개발자" 경고 시: 시스템 설정 → 개인정보 보호 및 보안 → 확인 없이 열기
+2. 폴더 안 `Practice Machine by SHY` 앱 더블클릭 — 첫 실행에 Python 런타임/의존성 자동 설치 후 브라우저 자동 오픈 (Python·Node·ffmpeg 없어도 됨)
+3. 처음 한 번 "확인되지 않은 개발자" 경고 시:
+   - macOS 14 이하: 시스템 설정 → 개인정보 보호 및 보안 → 확인 없이 열기
+   - macOS 15+에서 "열기" 버튼이 없거나 무반응이면 터미널에서
+     `xattr -dr com.apple.quarantine "앱 폴더 경로"` 1회 실행 → 이후 더블클릭만으로 실행
 
-앱 3종: `Practice Machine by SHY`(설치+실행) / `종료`(서버 정지) / `제거`(완전 삭제). 프론트 빌드물이 포함되어 받는 맥에 Node 불필요.
+앱 5종: `Practice Machine by SHY`(설치+실행) / `종료`(서버 정지) / `제거`(완전 삭제) / `로그`(에러 확인) / `외부접속 전환`(폰 접속). 프론트 빌드물이 포함되어 받는 맥에 Node 불필요.

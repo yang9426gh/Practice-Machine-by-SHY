@@ -51,6 +51,21 @@ def find_node() -> str:
     return ""
 
 
+def _ffmpeg_location() -> str:
+    """yt-dlp postprocessing용 ffmpeg 위치.
+
+    이걸 yt-dlp에 넘겨주지 않으면 PATH에 ffmpeg이 없는 환경(.app 실행 등)에서
+    다운로드 자체는 끝나지만 'Postprocessing: ffprobe and ffmpeg not found'로
+    실패한다. imageio-ffmpeg 번들 바이너리(venv 안)를 우선 사용.
+    """
+    try:
+        from ffmpeg_locate import ffmpeg_bin
+
+        return ffmpeg_bin()
+    except Exception:
+        return shutil.which("ffmpeg") or ""
+
+
 def _raise_cmd_error(rc: int, cmd: list, log_tail: str = "") -> None:
     """CalledProcessError에 실제 실패 로그 꼬리를 붙임 — UI에서 진단 가능하게.
     log_tail 없이 던지면 'Command [...' 만 보여서 원인을 알 수 없음."""
@@ -99,6 +114,10 @@ def download_youtube_audio(
     rc = os.environ.get("HOLY_YTDLP_REMOTE_COMPONENTS", "ejs:github").strip()
     if rc:
         cmd += ["--remote-components", rc]
+
+    ffl = _ffmpeg_location()
+    if ffl:
+        cmd += ["--ffmpeg-location", ffl]
 
     cmd += [
         "-x",
@@ -197,6 +216,10 @@ def download_youtube_video(
     rc = os.environ.get("HOLY_YTDLP_REMOTE_COMPONENTS", "ejs:github").strip()
     if rc:
         cmd += ["--remote-components", rc]
+
+    ffl = _ffmpeg_location()
+    if ffl:
+        cmd += ["--ffmpeg-location", ffl]
 
     cmd += [
         "-f",
