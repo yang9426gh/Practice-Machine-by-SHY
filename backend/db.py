@@ -358,6 +358,118 @@ def delete_preset_lyrics(data_dir: str, video_id: str) -> int:
         con.close()
 
 
+def import_library_items(data_dir: str, items: list[dict]) -> list[dict]:
+    """공유 .pmd 항목을 라이브러리에 병합 (빈 필드만 채움 — 기존 값 절대 덮지 않음).
+
+    - 정체성 키: video_id (URL 문자열 형태와 무관)
+    - 해당 video_id 행이 없으면 새 프리셋 생성 (미디어 없음 → video_ready=false)
+    - 있으면 비어있는 필드만 채움. 가사/코드 포함 전 필드 동일 규칙.
+    - 파일 내 중복 video_id: 순차 처리라 자연히 fill-empty로 통합됨
+    - 반환: 항목별 보고서 [{video_id, action, filled}] — action: created|updated|unchanged
+    """
+    con = sqlite3.connect(db_path(data_dir))
+    report: list[dict] = []
+    try:
+        cur = con.cursor()
+        for raw in items:
+            if not isinstance(raw, dict):
+                report.append({"video_id": None, "action": "skipped", "filled": [], "reason": "invalid item"})
+                continue
+            vid = str(raw.get("video_id") or "").strip()
+            if not vid:
+                report.append({"video_id": None, "action": "skipped", "filled": [], "reason": "video_id missing"})
+                continue
+
+            def _s(v) -> Optional[str]:
+                if v is None:
+                    return None
+                t = str(v).strip()
+                return t or None
+
+            url = _s(raw.get("url"))
+            title = _s(raw.get("title"))
+            thumb = _s(raw.get("thumbnail_url"))
+            bpm = raw.get("bpm")
+            try:
+                bpm = float(bpm) if bpm not in (None, "") else None
+            except (TypeError, ValueError):
+                bpm = None
+            key_tonic = _s(raw.get("key_tonic"))
+            key_mode = _s(raw.get("key_mode"))
+            if key_mode and key_mode.lower() not in ("major", "minor"):
+                key_mode = None
+            elif key_mode:
+                key_mode = key_mode.lower()
+            lyrics = _s(raw.get("lyrics_lrc"))
+            chords = _s(raw.get("chords_lrc"))
+
+            rows = cur.execute(
+                """SELECT id, title, thumbnail_url, bpm, key_tonic, key_mode, lyrics_lrc, chords_lrc
+                     FROM presets WHERE video_id=?""",
+                (vid,),
+            ).fetchall()
+
+            if not rows:
+                # 새 프리셋 (미디어 없음 — 나중에 다운로드하면 upsert_preset이 이 행에 병합)
+                cur.execute(
+                    """INSERT INTO presets(id, name, source_url, video_id, title, thumbnail_url,
+                                           bpm, key_tonic, key_mode, lyrics_lrc, chords_lrc)
+                       VALUES(?,?,?,?,?,?,?,?,?,?,?)""",
+                    (vid, title or vid, url, vid, title, thumb,
+                     bpm, key_tonic, key_mode, lyrics, chords),
+                )
+                filled = [f for f, v in
+                          (("title", title), ("thumbnail", thumb), ("bpm", bpm),
+                           ("key", key_tonic), ("lyrics", lyrics), ("chords", chords)) if v]
+                report.append({"video_id": vid, "action": "created", "filled": filled})
+                continue
+
+            # 기존 행(1개 이상 — 셸 프리셋 lyrics-*/chords-* 포함 가능)에 빈 필드만 채우기
+            idx = {"title": 1, "thumbnail_url": 2, "bpm": 3, "key_tonic": 4,
+                   "key_mode": 5, "lyrics_lrc": 6, "chords_lrc": 7}
+            cur_val = {c: next((r[i] for r in rows if r[i] not in (None, "")), None)
+                       for c, i in idx.items()}
+            filled: list[str] = []
+            sets: list[str] = []
+            args: list = []
+
+            def _add(col: str, label: str, new_val) -> None:
+                # 기존 값이 이미 있으면 절대 덮지 않음 — 보고서에도 미포함
+                if new_val is None or cur_val.get(col) not in (None, ""):
+                    return
+                sets.append(f"{col}=COALESCE(NULLIF({col},''), ?)")
+                args.append(new_val)
+                filled.append(label)
+
+            _add("title", "제목", title)
+            _add("thumbnail_url", "썸네일", thumb)
+            if bpm is not None and cur_val.get("bpm") in (None, ""):
+                sets.append("bpm=COALESCE(bpm, ?)")
+                args.append(bpm)
+                filled.append("BPM")
+            _add("key_tonic", "Key", key_tonic)
+            _add("key_mode", "Key", key_mode)
+            _add("lyrics_lrc", "가사", lyrics)
+            _add("chords_lrc", "코드", chords)
+
+            if sets:
+                # source_url도 비어있을 때만 (다운로드 버튼용)
+                if url:
+                    sets.append("source_url=COALESCE(NULLIF(source_url,''), ?)")
+                    args.append(url)
+                cur.execute(
+                    f"UPDATE presets SET {', '.join(sets)} WHERE video_id=?",
+                    (*args, vid),
+                )
+                report.append({"video_id": vid, "action": "updated", "filled": filled})
+            else:
+                report.append({"video_id": vid, "action": "unchanged", "filled": []})
+        con.commit()
+    finally:
+        con.close()
+    return report
+
+
 def list_presets(data_dir: str, limit: int = 100) -> list[dict]:
     con = sqlite3.connect(db_path(data_dir))
     con.row_factory = sqlite3.Row

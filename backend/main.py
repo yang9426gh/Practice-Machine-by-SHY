@@ -16,7 +16,7 @@ from typing import Optional
 from processor import download_youtube_audio, download_youtube_video, separate_stems
 from ytmusicapi import YTMusic
 
-from db import init_db, upsert_track, get_track, list_tracks, upsert_preset, list_presets, delete_preset, delete_track
+from db import init_db, upsert_track, get_track, list_tracks, upsert_preset, list_presets, delete_preset, delete_track, import_library_items
 
 YTM = YTMusic()
 
@@ -947,6 +947,21 @@ async def presets_get_one(preset_id: str):
         raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"preset lookup failed: {e}")
+
+
+@app.post("/library/import")
+async def library_import(payload: dict = Body(default={})):  # noqa: B008
+    """공유 .pmd 항목 병합 — video_id 기준 중복 방지, 빈 필드만 채움(기존 값 미덮음)."""
+    items = payload.get("items")
+    if not isinstance(items, list) or not items:
+        raise HTTPException(status_code=400, detail="items (list) required")
+    if len(items) > 500:
+        raise HTTPException(status_code=400, detail="too many items (max 500)")
+    report = import_library_items(DATA_DIR, items)
+    summary = {"created": 0, "updated": 0, "unchanged": 0, "skipped": 0}
+    for r in report:
+        summary[r["action"]] = summary.get(r["action"], 0) + 1
+    return {"ok": True, "summary": summary, "report": report}
 
 
 @app.post("/presets")
