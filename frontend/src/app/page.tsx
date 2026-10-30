@@ -1833,6 +1833,53 @@ export default function KaraokePage() {
     }
   };
 
+  // Export 저장: 네이티브 "다른 이름으로 저장" 대화상자 (이름+위치 사용자 지정)
+  // File System Access API(Chrome/Edge) → 폴백: 기존 <a download> 방식(Downloads)
+  const saveExportBlob = async (url: string, suggestedName: string) => {
+    const picker = (globalThis as any).showSaveFilePicker as
+      | ((opts: any) => Promise<any>)
+      | undefined;
+    if (picker) {
+      try {
+        const resp = await fetch(url);
+        if (!resp.ok) throw new Error(`fetch failed: ${resp.status}`);
+        const blob = await resp.blob();
+        const handle = await picker({
+          suggestedName,
+          types: [
+            {
+              description: suggestedName.endsWith(".mp4") ? "MP4 video" : "MP3 audio",
+              accept: suggestedName.endsWith(".mp4")
+                ? { "video/mp4": [".mp4"] }
+                : { "audio/mpeg": [".mp3"] },
+            },
+          ],
+        });
+        const w = await handle.createWritable();
+        await w.write(blob);
+        await w.close();
+        return true;
+      } catch (e: any) {
+        if (e?.name === "AbortError") throw e; // 사용자가 취소 → 상위에서 조용히 마무리
+        // 그 외 오류(권한 등)는 폴백으로
+      }
+    }
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = suggestedName;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    return false;
+  };
+
+  // 파일명용 곡 제목 (금칙문자 정리, 없으면 taskId)
+  const exportBaseName = () =>
+    (nowTitle || "").replace(/[\\/:*?"<>|]+/g, "").trim().replace(/\s+/g, " ") ||
+    videoId ||
+    taskId ||
+    "export";
+
   const exportMp3 = async () => {
     if (!taskId) return;
     try {
@@ -1848,13 +1895,15 @@ export default function KaraokePage() {
           otherInstVol,
           vocalsVol,
           instrumentsVol,
+          semitones, // 화면과 동일한 키로 export (없으면 항상 원본 키로 나감)
         }),
       });
       const j = await resp.json();
       if (!resp.ok) throw new Error(j?.detail || "export failed");
 
       const url = `${BACKEND}${j.mp3}`;
-      const fname = `mix_${videoId || taskId}.mp3`;
+      const keyTag = semitones !== 0 ? ` (${semitones > 0 ? "+" : ""}${semitones})` : "";
+      const fname = `${exportBaseName()}${keyTag}.mp3`;
 
       // If running inside Electron (mac app), use native Save As dialog.
       // @ts-ignore
@@ -1863,13 +1912,16 @@ export default function KaraokePage() {
         await holy.saveFile(url, fname);
         toast("Exported MP3");
       } else {
-        const a = document.createElement("a");
-        a.href = url;
-        a.download = fname;
-        document.body.appendChild(a);
-        a.click();
-        a.remove();
-        toast("Exported MP3 (check Downloads)");
+        try {
+          const picked = await saveExportBlob(url, fname);
+          toast(picked ? "Exported MP3" : "Exported MP3 (check Downloads)");
+        } catch (e: any) {
+          if (e?.name === "AbortError") {
+            toast("Export 취소됨");
+            return;
+          }
+          throw e;
+        }
       }
     } catch (e: any) {
       toast(`Export failed: ${String(e?.message || e)}`);
@@ -1914,20 +1966,24 @@ export default function KaraokePage() {
         setVideoExportPct(Math.max(1, Number(sj.pct) || 0));
         if (sj.stage === "done") {
           const url = `${BACKEND}${sj.out}`;
-          const fname = `video_${videoId || taskId}.mp4`;
+          const keyTag = semitones !== 0 ? ` (${semitones > 0 ? "+" : ""}${semitones})` : "";
+          const fname = `${exportBaseName()}${keyTag}.mp4`;
           // @ts-ignore
           const holy = (globalThis as any).holy;
           if (holy?.saveFile) {
             await holy.saveFile(url, fname);
           } else {
-            const a = document.createElement("a");
-            a.href = url;
-            a.download = fname;
-            document.body.appendChild(a);
-            a.click();
-            a.remove();
+            try {
+              await saveExportBlob(url, fname);
+            } catch (e: any) {
+              if (e?.name === "AbortError") {
+                toast("Export 취소됨 (파일은 백엔드 exports 폴더에 보관됨)");
+                return;
+              }
+              throw e;
+            }
           }
-          toast("Exported video (check Downloads)");
+          toast("Exported video");
           return;
         }
       }
