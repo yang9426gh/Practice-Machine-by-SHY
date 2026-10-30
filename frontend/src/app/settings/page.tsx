@@ -4,6 +4,7 @@ import React from 'react';
 import Link from 'next/link';
 import { useSettings } from '../../lib/useSettings';
 import { loadLastTrack } from '../../lib/lastTrack';
+import { DEFAULT_SETTINGS, clampNum } from '../../lib/settings';
 
 function Row({ label, value, min, max, step, onChange }: {
   label: string;
@@ -75,6 +76,15 @@ export default function SettingsPage() {
             <Row label="Vignette bottom" value={settings.vignetteBottom} min={0} max={1} step={0.01} onChange={(v) => patch({ vignetteBottom: v })} />
             <Row label="Vignette sides" value={settings.vignetteSides} min={0} max={1} step={0.01} onChange={(v) => patch({ vignetteSides: v })} />
           </div>
+        </div>
+
+        <div className="rounded-xl border border-zinc-800 bg-zinc-950/60 p-5 space-y-5">
+          <div>
+            <div className="text-sm font-semibold text-zinc-200">Stamp timing (스탬프 타이밍)</div>
+            <p className="text-xs text-zinc-500 mt-1">스탬프 버튼을 누르면 설정한 시간만큼 일찍 기록됩니다 (사람 반응시간 보정). 클수록 더 일찍 찍힘, 0 = 누른 시각. 0.05초 단위.</p>
+          </div>
+          <Row label="Chord stamp lead (초)" value={settings.chordStampLeadSec} min={0} max={1} step={0.05} onChange={(v) => patch({ chordStampLeadSec: clampNum(v, 0, 1, DEFAULT_SETTINGS.chordStampLeadSec) })} />
+          <Row label="Lyric stamp lead (초)" value={settings.lyricStampLeadSec} min={0} max={1} step={0.05} onChange={(v) => patch({ lyricStampLeadSec: clampNum(v, 0, 1, DEFAULT_SETTINGS.lyricStampLeadSec) })} />
         </div>
 
         <div className="rounded-xl border border-zinc-800 bg-zinc-950/60 p-5 space-y-3">
