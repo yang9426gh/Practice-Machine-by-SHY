@@ -2307,13 +2307,13 @@ export default function KaraokePage() {
               {chords && chordsShow && chordActiveIdx >= 0 ? (
                 <div className="text-center space-y-1">
                   {chordActiveIdx > 0 ? (
-                    <div className="text-lg lg:text-xl text-zinc-500 truncate">
+                    <div className="text-[20px] lg:text-[22px] text-zinc-500 truncate">
                       {chords.lines[chordActiveIdx - 1].chords.map((c, ci) => (
                         <span key={ci}>{transposeChordText(c.text, semitones + keyAdj)}{"  "}</span>
                       ))}
                     </div>
                   ) : null}
-                  <div className="flex flex-wrap justify-center items-baseline gap-x-8 text-4xl lg:text-5xl font-bold break-keep drop-shadow-lg">
+                  <div className="flex flex-wrap justify-center items-baseline gap-x-8 text-[38px] lg:text-[50px] font-bold break-keep drop-shadow-lg">
                     {chords.lines[chordActiveIdx].chords.map((c, ci) => (
                       <span
                         key={`${ci}-${c.time}`}
@@ -2330,7 +2330,7 @@ export default function KaraokePage() {
                     ))}
                   </div>
                   {chordActiveIdx + 1 < chords.lines.length ? (
-                    <div className="text-xl lg:text-2xl text-zinc-400 mt-1 truncate">
+                    <div className="text-[22px] lg:text-[26px] text-zinc-400 mt-1 truncate">
                       {chords.lines[chordActiveIdx + 1].chords.map((c, ci) => (
                         <span key={ci}>{transposeChordText(c.text, semitones + keyAdj)}{"  "}</span>
                       ))}
@@ -2342,15 +2342,15 @@ export default function KaraokePage() {
               {lyrics && lyricsShow && lyricActiveIdx >= 0 ? (
                 <div className="text-center space-y-1">
                   {lyricActiveIdx > 0 ? (
-                    <div className="text-lg lg:text-xl text-zinc-500 truncate">
+                    <div className="text-[20px] lg:text-[22px] text-zinc-500 truncate">
                       {lyricLines[lyricActiveIdx - 1].text}
                     </div>
                   ) : null}
-                  <div className="text-2xl lg:text-3xl font-bold text-white break-keep drop-shadow-lg">
+                  <div className="text-[26px] lg:text-[32px] font-bold text-white break-keep drop-shadow-lg">
                     {lyricLines[lyricActiveIdx].text}
                   </div>
                   {lyricActiveIdx + 1 < lyricLines.length ? (
-                    <div className="text-lg lg:text-xl text-zinc-400 mt-1 truncate">
+                    <div className="text-[20px] lg:text-[22px] text-zinc-400 mt-1 truncate">
                       {lyricLines[lyricActiveIdx + 1].text}
                     </div>
                   ) : null}
