@@ -421,9 +421,10 @@ export default function KaraokePage() {
   // 코드용 스탬프: 커서 위치에 [시각] 삽입 — 줄바꿈 없이 인라인.
   // 빈 스탬프 연타 허용: 바로 앞이 "빈 스탬프+공백"이어도 교체하지 않고 새 스탬프를 추가한다
   // (시간 먼저 여러 개 찍어두고 나중에 코드 채우기 워크플로).
+  const STAMP_LEAD = 0.25; // 스탬프 반응 보정(초) — 버튼을 누른 '체감' 타이밍에 맞춰 일찍 기록
   const stampChordAtCursor = () => {
     const el = document.getElementById("chords-edit-area") as HTMLTextAreaElement | null;
-    const t = Math.max(0, currentPositionLive());
+    const t = Math.max(0, currentPositionLive() - STAMP_LEAD);
     const mm = Math.floor(t / 60);
     const ss = t - mm * 60;
     const stamp = `[${String(mm).padStart(2, "0")}:${ss.toFixed(2).padStart(5, "0")}]`;
@@ -736,7 +737,7 @@ export default function KaraokePage() {
   // 편집기 텍스트커서 위치에 현재 재생 시간 스탬프 삽입 후 커서를 다음 줄 맨 앞으로 (연타 워크플로)
   const stampAtCursor = () => {
     const el = document.getElementById("lyrics-edit-area") as HTMLTextAreaElement | null;
-    const t = Math.max(0, currentPositionLive());
+    const t = Math.max(0, currentPositionLive() - STAMP_LEAD);
     const mm = Math.floor(t / 60);
     const ss = t - mm * 60;
     const stamp = `[${String(mm).padStart(2, "0")}:${ss.toFixed(2).padStart(5, "0")}]`;
