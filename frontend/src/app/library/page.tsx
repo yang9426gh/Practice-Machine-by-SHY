@@ -3,8 +3,11 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { BrandHeader, SupportButton } from "../../components/Brand";
+import { LayoutGrid, List } from "lucide-react";
 
 const BACKEND = process.env.NEXT_PUBLIC_BACKEND_URL || (typeof window !== "undefined" ? window.location.origin : "http://localhost:8011");
+
+const LIBRARY_VIEW_KEY = "karaoke_library_view"; // "cards" | "list"
 
 type Preset = {
   id: string;
@@ -42,6 +45,21 @@ export default function LibraryPage() {
   const [loading, setLoading] = useState(false);
 
   const [sort, setSort] = useState<"recent" | "bpm_asc" | "bpm_desc" | "key_asc" | "key_desc">("recent");
+
+  // 보기 방식 (카드/리스트) — localStorage 저장, 마운트 후 복원 (SSR hydration 불일치 방지)
+  const [view, setView] = useState<"cards" | "list">("cards");
+  useEffect(() => {
+    try {
+      const v = window.localStorage.getItem(LIBRARY_VIEW_KEY);
+      if (v === "cards" || v === "list") setView(v);
+    } catch {}
+  }, []);
+  const changeView = (v: "cards" | "list") => {
+    setView(v);
+    try {
+      window.localStorage.setItem(LIBRARY_VIEW_KEY, v);
+    } catch {}
+  };
 
   // ---------- Queue state ----------
   const [queueItems, setQueueItems] = useState<QueueItem[]>([]);
@@ -237,6 +255,25 @@ export default function LibraryPage() {
           </div>
           <div className="flex-1" />
 
+          <div className="flex rounded-lg border border-zinc-700 overflow-hidden shrink-0" role="group" aria-label="보기 방식">
+            <button
+              onClick={() => changeView("cards")}
+              aria-label="카드 보기"
+              title="카드 보기"
+              className={`px-2.5 py-2 ${view === "cards" ? "bg-zinc-800 text-white" : "text-zinc-500 hover:text-zinc-300"}`}
+            >
+              <LayoutGrid size={16} />
+            </button>
+            <button
+              onClick={() => changeView("list")}
+              aria-label="목록 보기"
+              title="목록 보기"
+              className={`px-2.5 py-2 border-l border-zinc-700 ${view === "list" ? "bg-zinc-800 text-white" : "text-zinc-500 hover:text-zinc-300"}`}
+            >
+              <List size={16} />
+            </button>
+          </div>
+
           <select
             value={sort}
             onChange={(e) => setSort(e.target.value as any)}
@@ -348,6 +385,7 @@ export default function LibraryPage() {
           <div className="text-zinc-500 text-sm">No items.</div>
         ) : null}
 
+        {view === "cards" ? (
         <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-4">
           {filtered.map((p) => (
             <div key={p.id} className="relative rounded-2xl border border-zinc-800 bg-zinc-950/60 hover:bg-zinc-900/60 overflow-hidden">
@@ -400,6 +438,57 @@ export default function LibraryPage() {
             </div>
           ))}
         </div>
+        ) : (
+        <div className="space-y-2">
+          {filtered.map((p) => (
+            <div key={p.id} className="relative rounded-xl border border-zinc-800 bg-zinc-950/60 hover:bg-zinc-900/60">
+              <button onClick={() => openPreset(p)} className="flex items-center gap-3 w-full text-left p-2 pr-[140px]">
+                <div className="w-12 h-12 rounded-lg overflow-hidden bg-zinc-900 shrink-0">
+                  {p.thumbnail_url ? (
+                    // eslint-disable-next-line @next/next/no-img-element
+                    <img src={p.thumbnail_url} alt="thumb" className="w-12 h-12 object-cover" />
+                  ) : null}
+                </div>
+                <div className="flex-1 min-w-0 space-y-0.5">
+                  <div className="text-sm text-zinc-100 truncate">{p.title || p.name || p.video_id}</div>
+                  <div className="text-[11px] text-zinc-500 truncate">{p.video_id}</div>
+                  <div className="flex items-center gap-2 flex-wrap">
+                    {queuedIds.has(p.video_id) ? (
+                      <div className="text-[10px] px-2 py-0.5 rounded-full bg-blue-600/90 text-white font-semibold">준비 중…</div>
+                    ) : null}
+                    {p.bpm != null ? <div className="text-[11px] px-2 py-0.5 rounded-full border border-zinc-800 text-zinc-300">{p.bpm} BPM</div> : null}
+                    {p.key_tonic && p.key_mode ? (
+                      <div className="text-[11px] px-2 py-0.5 rounded-full border border-zinc-800 text-zinc-300">
+                        {p.key_tonic}{p.key_mode === "minor" ? "m" : "M"}
+                      </div>
+                    ) : null}
+                    {p.has_lyrics ? (
+                      <div className="text-[11px] px-2 py-0.5 rounded-full border border-violet-800/60 bg-violet-950/30 text-violet-300">가사</div>
+                    ) : null}
+                    {p.has_chords ? (
+                      <div className="text-[11px] px-2 py-0.5 rounded-full border border-emerald-800/60 bg-emerald-950/30 text-emerald-300">코드</div>
+                    ) : null}
+                  </div>
+                </div>
+              </button>
+              <div className="absolute right-2 top-1/2 -translate-y-1/2 flex gap-2">
+                <button
+                  onClick={() => renamePreset(p)}
+                  className="text-[11px] px-2 py-1 rounded-md border border-zinc-800 bg-zinc-950/70"
+                >
+                  Rename
+                </button>
+                <button
+                  onClick={() => deletePreset(p)}
+                  className="text-[11px] px-2 py-1 rounded-md border border-red-900 bg-red-950/40 text-red-200"
+                >
+                  Delete
+                </button>
+              </div>
+            </div>
+          ))}
+        </div>
+        )}
       </div>
 
       {/* toast */}
