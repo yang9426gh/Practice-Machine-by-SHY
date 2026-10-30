@@ -2846,7 +2846,7 @@ export default function KaraokePage() {
 
       {/* Lyrics modal: menu / lrclib / paste / edit */}
       {lyricsOpen ? (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-4" onClick={() => setLyricsOpen(false)}>
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-4" onMouseDown={(e) => { if (e.target === e.currentTarget) setLyricsOpen(false); }}>
           <div
             className="w-full max-w-lg rounded-2xl border border-zinc-800 bg-zinc-950 p-5 space-y-4 max-h-[85vh] overflow-auto"
             onClick={(e) => e.stopPropagation()}
@@ -3041,7 +3041,7 @@ export default function KaraokePage() {
       ) : null}
 
       {chordsOpen ? (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-4" onClick={() => setChordsOpen(false)}>
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-4" onMouseDown={(e) => { if (e.target === e.currentTarget) setChordsOpen(false); }}>
           <div
             className="w-full max-w-2xl rounded-2xl border border-zinc-800 bg-zinc-950 p-5 space-y-4 max-h-[85vh] overflow-auto"
             onClick={(e) => e.stopPropagation()}

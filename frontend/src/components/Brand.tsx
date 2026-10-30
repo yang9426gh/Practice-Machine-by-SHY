@@ -95,7 +95,7 @@ export function SupportButton() {
         ? createPortal(
             <div
               className="fixed inset-0 z-[100] flex items-center justify-center bg-black/70 backdrop-blur-sm p-4"
-              onClick={() => setOpen(false)}
+              onMouseDown={(e) => { if (e.target === e.currentTarget) setOpen(false); }}
             >
               <div
                 className="bg-zinc-900 border border-zinc-700 rounded-2xl p-5 w-[340px] max-w-[92vw] shadow-2xl"
