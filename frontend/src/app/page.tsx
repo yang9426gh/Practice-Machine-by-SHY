@@ -422,16 +422,16 @@ export default function KaraokePage() {
   // 코드용 스탬프: 커서 위치에 [시각] 삽입 — 줄바꿈 없이 인라인.
   // 빈 스탬프 연타 허용: 바로 앞이 "빈 스탬프+공백"이어도 교체하지 않고 새 스탬프를 추가한다
   // (시간 먼저 여러 개 찍어두고 나중에 코드 채우기 워크플로).
-  // 스탬프 반응 보정(초) — 설정 페이지에서 0.05 단위 조정 (기본 0.25, 클수록 더 일찍 기록)
-  // 클릭 시점에 localStorage를 직접 읽으므로 설정 변경이 다른 탭/페이지에서도 즉시 반영됨
-  const stampLead = (kind: "chord" | "lyric") => {
+  // 스탬프 오프셋(초) — 설정 페이지에서 0.05 단위 조정 (기본 -0.25 = 0.25초 더 일찍 기록)
+  // 음수=더 일찍, 양수=더 늦게. 클릭 시점에 localStorage를 직접 읽어 변경이 즉시 반영됨
+  const stampOffset = (kind: "chord" | "lyric") => {
     const s = loadSettings();
-    const v = kind === "chord" ? s.chordStampLeadSec : s.lyricStampLeadSec;
-    return Number.isFinite(v) ? v : 0.25;
+    const v = kind === "chord" ? s.chordStampOffsetSec : s.lyricStampOffsetSec;
+    return Number.isFinite(v) ? v : -0.25;
   };
   const stampChordAtCursor = () => {
     const el = document.getElementById("chords-edit-area") as HTMLTextAreaElement | null;
-    const t = Math.max(0, currentPositionLive() - stampLead("chord"));
+    const t = Math.max(0, currentPositionLive() + stampOffset("chord"));
     const mm = Math.floor(t / 60);
     const ss = t - mm * 60;
     const stamp = `[${String(mm).padStart(2, "0")}:${ss.toFixed(2).padStart(5, "0")}]`;
@@ -744,7 +744,7 @@ export default function KaraokePage() {
   // 편집기 텍스트커서 위치에 현재 재생 시간 스탬프 삽입 후 커서를 다음 줄 맨 앞으로 (연타 워크플로)
   const stampAtCursor = () => {
     const el = document.getElementById("lyrics-edit-area") as HTMLTextAreaElement | null;
-    const t = Math.max(0, currentPositionLive() - stampLead("lyric"));
+    const t = Math.max(0, currentPositionLive() + stampOffset("lyric"));
     const mm = Math.floor(t / 60);
     const ss = t - mm * 60;
     const stamp = `[${String(mm).padStart(2, "0")}:${ss.toFixed(2).padStart(5, "0")}]`;

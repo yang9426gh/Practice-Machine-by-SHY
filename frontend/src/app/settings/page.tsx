@@ -2,40 +2,50 @@
 
 import React from 'react';
 import Link from 'next/link';
+import { ChevronLeft, ChevronRight } from 'lucide-react';
 import { useSettings } from '../../lib/useSettings';
-import { loadLastTrack } from '../../lib/lastTrack';
 import { DEFAULT_SETTINGS, clampNum } from '../../lib/settings';
 
-function Row({ label, value, min, max, step, onChange }: {
+const STEP = 0.05;
+const LIMIT = 2; // 최대 ±2초
+
+// ← [-0.25s] → 스테퍼: 왼쪽 버튼 -0.05, 오른쪽 버튼 +0.05
+function OffsetStepper({ label, value, onChange }: {
   label: string;
   value: number;
-  min: number;
-  max: number;
-  step: number;
   onChange: (v: number) => void;
 }) {
+  const bump = (dir: 1 | -1) => onChange(clampNum(value + dir * STEP, -LIMIT, LIMIT, DEFAULT_SETTINGS.chordStampOffsetSec));
+  const atMin = value <= -LIMIT + 1e-9;
+  const atMax = value >= LIMIT - 1e-9;
   return (
     <div className="space-y-2">
-      <div className="flex items-center justify-between">
-        <div className="text-sm font-semibold text-zinc-200">{label}</div>
-        <div className="text-xs font-mono text-zinc-400">{value.toFixed(2)}</div>
+      <div className="text-sm font-semibold text-zinc-200">{label}</div>
+      <div className="flex items-center justify-center gap-6">
+        <button
+          onClick={() => bump(-1)}
+          disabled={atMin}
+          aria-label={`${label} 0.05초 일찍`}
+          className="w-11 h-11 rounded-lg border border-zinc-700 flex items-center justify-center hover:bg-zinc-800 disabled:opacity-30 disabled:cursor-not-allowed"
+        >
+          <ChevronLeft size={20} />
+        </button>
+        <div className="text-3xl font-mono tabular-nums w-28 text-center">{value.toFixed(2)}s</div>
+        <button
+          onClick={() => bump(1)}
+          disabled={atMax}
+          aria-label={`${label} 0.05초 늦게`}
+          className="w-11 h-11 rounded-lg border border-zinc-700 flex items-center justify-center hover:bg-zinc-800 disabled:opacity-30 disabled:cursor-not-allowed"
+        >
+          <ChevronRight size={20} />
+        </button>
       </div>
-      <input
-        type="range"
-        min={min}
-        max={max}
-        step={step}
-        value={value}
-        onChange={(e) => onChange(Number(e.target.value))}
-        className="w-full"
-      />
     </div>
   );
 }
 
 export default function SettingsPage() {
   const { settings, patch, reset } = useSettings();
-  const meta = loadLastTrack();
 
   return (
     <main className="min-h-screen bg-black text-white">
@@ -43,7 +53,7 @@ export default function SettingsPage() {
         <div className="flex items-center justify-between">
           <div>
             <h1 className="text-2xl font-black">Settings</h1>
-            <p className="text-zinc-400 text-sm">UI tuning for album-art background + readability</p>
+            <p className="text-zinc-400 text-sm">Stamp timing</p>
           </div>
           <div className="flex gap-2">
             <button
@@ -61,72 +71,23 @@ export default function SettingsPage() {
           </div>
         </div>
 
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-          <div className="rounded-xl border border-zinc-800 bg-zinc-950/60 p-5 space-y-5">
-            <div className="text-sm font-semibold text-zinc-200">Album-art background</div>
-            <Row label="Background opacity" value={settings.bgOpacity} min={0} max={1} step={0.01} onChange={(v) => patch({ bgOpacity: v })} />
-            <Row label="Background blur (px)" value={settings.bgBlurPx} min={0} max={60} step={1} onChange={(v) => patch({ bgBlurPx: v })} />
-            <Row label="Background saturation" value={settings.bgSaturate} min={0.5} max={2.5} step={0.05} onChange={(v) => patch({ bgSaturate: v })} />
-          </div>
-
-          <div className="rounded-xl border border-zinc-800 bg-zinc-950/60 p-5 space-y-5">
-            <div className="text-sm font-semibold text-zinc-200">Readability overlays</div>
-            <Row label="Overall dark overlay" value={settings.overlayOpacity} min={0} max={0.8} step={0.01} onChange={(v) => patch({ overlayOpacity: v })} />
-            <Row label="Vignette top" value={settings.vignetteTop} min={0} max={1} step={0.01} onChange={(v) => patch({ vignetteTop: v })} />
-            <Row label="Vignette bottom" value={settings.vignetteBottom} min={0} max={1} step={0.01} onChange={(v) => patch({ vignetteBottom: v })} />
-            <Row label="Vignette sides" value={settings.vignetteSides} min={0} max={1} step={0.01} onChange={(v) => patch({ vignetteSides: v })} />
-          </div>
-        </div>
-
-        <div className="rounded-xl border border-zinc-800 bg-zinc-950/60 p-5 space-y-5">
+        <div className="rounded-xl border border-zinc-800 bg-zinc-950/60 p-5 space-y-6">
           <div>
             <div className="text-sm font-semibold text-zinc-200">Stamp timing (스탬프 타이밍)</div>
-            <p className="text-xs text-zinc-500 mt-1">스탬프 버튼을 누르면 설정한 시간만큼 일찍 기록됩니다 (사람 반응시간 보정). 클수록 더 일찍 찍힘, 0 = 누른 시각. 0.05초 단위.</p>
+            <p className="text-xs text-zinc-500 mt-1">
+              스탬프 버튼을 누를 때 기록되는 시각 조정. 음수 = 그만큼 더 일찍 기록 (기본 -0.25초), 양수 = 더 늦게 기록. 0.05초 단위, 최대 ±2초.
+            </p>
           </div>
-          <Row label="Chord stamp lead (초)" value={settings.chordStampLeadSec} min={0} max={1} step={0.05} onChange={(v) => patch({ chordStampLeadSec: clampNum(v, 0, 1, DEFAULT_SETTINGS.chordStampLeadSec) })} />
-          <Row label="Lyric stamp lead (초)" value={settings.lyricStampLeadSec} min={0} max={1} step={0.05} onChange={(v) => patch({ lyricStampLeadSec: clampNum(v, 0, 1, DEFAULT_SETTINGS.lyricStampLeadSec) })} />
-        </div>
-
-        <div className="rounded-xl border border-zinc-800 bg-zinc-950/60 p-5 space-y-3">
-          <div className="text-sm font-semibold text-zinc-200">Preview</div>
-          <p className="text-sm text-zinc-400">This preview uses the last loaded song's cover (saved locally). Tweak sliders until it looks right.</p>
-
-          <div className="rounded-xl overflow-hidden border border-zinc-800 mt-3">
-            <div className="relative h-44 bg-black">
-              {meta.coverUrl && (
-                <div
-                  className="absolute inset-0 scale-110"
-                  style={{
-                    backgroundImage: `url(${meta.coverUrl})`,
-                    backgroundSize: 'cover',
-                    backgroundPosition: 'center',
-                    opacity: settings.bgOpacity,
-                    filter: `blur(${settings.bgBlurPx}px) saturate(${settings.bgSaturate})`,
-                  }}
-                />
-              )}
-              <div
-                className="absolute inset-0"
-                style={{
-                  background: `linear-gradient(to bottom, rgba(0,0,0,${settings.vignetteTop}) 0%, rgba(0,0,0,0) 40%, rgba(0,0,0,${settings.vignetteBottom}) 100%)`,
-                }}
-              />
-              <div
-                className="absolute inset-0"
-                style={{
-                  background: `linear-gradient(to right, rgba(0,0,0,${settings.vignetteSides}) 0%, rgba(0,0,0,0) 50%, rgba(0,0,0,${settings.vignetteSides}) 100%)`,
-                }}
-              />
-              <div className="absolute inset-0" style={{ backgroundColor: `rgba(0,0,0,${settings.overlayOpacity})` }} />
-
-              <div className="absolute inset-0 flex flex-col justify-end p-4">
-                <div className="text-sm font-semibold text-white/90">{meta.title || 'Load a song on the main page'}</div>
-                <div className="text-xs text-white/60">{meta.artist || ''}</div>
-              </div>
-            </div>
-          </div>
-
-          <p className="text-xs text-zinc-500">Settings are saved in your browser (localStorage).</p>
+          <OffsetStepper
+            label="Chord stamp (코드)"
+            value={settings.chordStampOffsetSec}
+            onChange={(v) => patch({ chordStampOffsetSec: clampNum(v, -LIMIT, LIMIT, DEFAULT_SETTINGS.chordStampOffsetSec) })}
+          />
+          <OffsetStepper
+            label="Lyric stamp (가사)"
+            value={settings.lyricStampOffsetSec}
+            onChange={(v) => patch({ lyricStampOffsetSec: clampNum(v, -LIMIT, LIMIT, DEFAULT_SETTINGS.lyricStampOffsetSec) })}
+          />
         </div>
       </div>
     </main>
