@@ -35,7 +35,10 @@ def find_node() -> str:
     for p in (
         "/opt/homebrew/bin/node",
         "/usr/local/bin/node",
-        os.path.expanduser("~/.nvm/versions/node"),  # nvm은 최신 버전 디렉토리 스캔
+        "C:\\Program Files\\nodejs\\node.exe",        # Windows
+        "C:\\Program Files (x86)\\nodejs\\node.exe",  # Windows (32bit 빌드)
+        os.path.expanduser("~/.nvm/versions/node"),   # nvm은 최신 버전 디렉토리 스캔
+        os.path.expanduser("~/AppData/Roaming/nvm"),  # nvm-windows도 디렉토리 스캔
     ):
         if os.path.isfile(p):
             return p
@@ -43,9 +46,12 @@ def find_node() -> str:
             try:
                 vers = sorted(os.listdir(p))
                 if vers:
-                    cand = os.path.join(p, vers[-1], "bin", "node")
-                    if os.path.isfile(cand):
-                        return cand
+                    for cand in (
+                        os.path.join(p, vers[-1], "bin", "node"),  # nvm (macOS/Linux)
+                        os.path.join(p, vers[-1], "node.exe"),     # nvm-windows
+                    ):
+                        if os.path.isfile(cand):
+                            return cand
             except Exception:
                 pass
     return ""

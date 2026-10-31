@@ -14,7 +14,7 @@
 set -euo pipefail
 cd "$(dirname "${BASH_SOURCE[0]}")"
 ROOT="$(pwd)"
-VERSION="1.4.3"
+VERSION="1.5.0"
 STAGE="$(mktemp -d)"
 DMG_DIR="$STAGE/dmg"
 APPDIR="$DMG_DIR/Practice Machine by SHY"   # 배포 폴더 = 프로젝트 루트 (앱들이 그 안에 위치)
@@ -67,6 +67,7 @@ rsync -a \
   --exclude '__pycache__' --exclude '*.pyc' \
   --exclude 'frontend/node_modules' --exclude 'frontend/.next' \
   --exclude '.git' --exclude 'runtime' --exclude 'dist' --exclude 'launcher.log' --exclude 'toggle.log' \
+  --exclude 'windows_*' --exclude '*.bat' --exclude 'README-WINDOWS.txt' \
   --exclude '.DS_Store' --exclude 'assets' --exclude 'make_icon.py' --exclude 'build_package.sh' \
   "$ROOT/" "$APPDIR/"
 
@@ -95,6 +96,14 @@ cat > "$APPDIR/! 먼저 읽으세요.txt" <<'EOF'
 6. 폰·태블릿에서 부르기: "Practice Machine by SHY 외부접속 전환" 앱 더블클릭
    · 한 번 실행: 외부접속 켜짐 — 같은 와이파이 기기에서 http://<이 맥 IP>:8011 접속 (IP는 팝업에 표시)
    · 다시 한 번 실행: 외부접속 꺼짐 — 이 컴퓨터에서만 접속 (기본 상태)
+
+7. 다른 사람에게 곡 데이터 공유 (.pmd): 라이브러리 페이지 우측 상단 "Export Data"
+   · 공유할 곡을 체크하고 Export 버튼을 누르면 .pmd 파일이 저장됩니다
+     (제목·썸네일·유튜브 URL·BPM·Key·가사·코드 포함, 용량 매우 작음 — 영상은 미포함)
+· 받은 사람은 라이브러리의 "Import Data"에서 .pmd 파일을 끌어다 놓으면
+     곡이 목록에 추가됩니다. 영상이 없는 곡은 흑백 썸네일로 표시되고
+     Download 버튼을 누르면 그때 영상을 받아옵니다.
+     이미 있는 곡이면 비어있는 정보만 채워집니다 (중복 저장 없음).
 
 ※ 처음 열 때 "확인되지 않은 개발자" 경고가 뜨면 (macOS 보안 정책):
    · macOS 14 이하: 시스템 설정 → 개인정보 보호 및 보안 → 맨 아래 "확인 없이 열기" 클릭
