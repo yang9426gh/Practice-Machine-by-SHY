@@ -138,6 +138,18 @@ function monoMix(buf: AudioBuffer): Float32Array {
   return out;
 }
 
+// Mono mixes are expensive to recompute (whole-song copy) and the live monitor calls
+// detection ~3x/s, so cache them per AudioBuffer for the session.
+const monoCache = new WeakMap<AudioBuffer, Float32Array>();
+function monoMixCached(buf: AudioBuffer): Float32Array {
+  let m = monoCache.get(buf);
+  if (!m) {
+    m = monoMix(buf);
+    monoCache.set(buf, m);
+  }
+  return m;
+}
+
 interface ChromaOpts {
   fmin: number; fmax: number; expo: number; harm: boolean; frameL1?: boolean;
 }
@@ -213,6 +225,7 @@ export interface DetectOptions {
   keyMode?: string | null;
   semitones?: number; // audio transpose applied to the buffers; detected pcs are shifted back
   pref?: "flat" | "sharp"; // accidental preference when no key info (falls back to "sharp")
+  durSec?: number; // analysis window length; default 1.2s (live monitor uses 1.0s)
 }
 
 const UPPER_STEMS = ["other", "guitar", "piano"];
@@ -222,12 +235,13 @@ export function detectChordAtTime(
   tSec: number,
   opts: DetectOptions = {}
 ): ChordGuess | null {
+  const dur = opts.durSec ?? WIN_DUR;
   let u = new Float32Array(12);
   let nb = 0;
   for (const stem of UPPER_STEMS) {
     const buf = buffers[stem];
     if (!buf) continue;
-    const c = chromaOfWindow(monoMix(buf), buf.sampleRate, tSec, WIN_DUR,
+    const c = chromaOfWindow(monoMixCached(buf), buf.sampleRate, tSec, dur,
       { fmin: FMIN, fmax: MIX_FMAX, expo: UPPER_EXPO, harm: false });
     if (!c) continue;
     for (let i = 0; i < 12; i++) u[i] += c[i];
@@ -237,7 +251,7 @@ export function detectChordAtTime(
     // legacy 2-stem songs: no_vocals carries the instruments
     const nv = buffers["no_vocals"];
     if (nv) {
-      const c = chromaOfWindow(monoMix(nv), nv.sampleRate, tSec, WIN_DUR,
+      const c = chromaOfWindow(monoMixCached(nv), nv.sampleRate, tSec, dur,
         { fmin: FMIN, fmax: MIX_FMAX, expo: UPPER_EXPO, harm: false });
       if (c) { u = c.slice(); nb = 1; }
     }
@@ -253,7 +267,7 @@ export function detectChordAtTime(
   let b: Float32Array | null = null;
   const bassBuf = buffers["bass"];
   if (bassBuf) {
-    const c = chromaOfWindow(monoMix(bassBuf), bassBuf.sampleRate, tSec, WIN_DUR,
+    const c = chromaOfWindow(monoMixCached(bassBuf), bassBuf.sampleRate, tSec, dur,
       { fmin: BASS_FMIN, fmax: BASS_FMAX, expo: BASS_EXPO, harm: true, frameL1: true });
     if (c) {
       let mx = 0;

@@ -1121,6 +1121,60 @@ export default function KaraokePage() {
   };
 
   const [semitones, setSemitones] = useState(0); // applied
+
+  // ♫ 상시 코드 디텍터 모니터 (0.3초 격자) — 재생 구간을 0.3초 격자 프레임으로 나눠
+  // 각 프레임 [g, g+1.0s]이 완전히 지나간 직후 분석해 칩에 표시 ("최근 1초에 들린 코드").
+  // 3Hz 리렌더를 피하려고 React state 대신 ref.textContent를 직접 갱신.
+  const monitorChipRef = useRef<HTMLSpanElement | null>(null);
+  const monitorStateRef = useRef<{ lastK: number; label: string }>({ lastK: -1, label: "" });
+  useEffect(() => {
+    const MONITOR_HOP = 0.3;
+    const MONITOR_DUR = 1.0;
+    const iv = setInterval(() => {
+      const el = monitorChipRef.current;
+      if (!el) return; // 코드 편집 영역이 닫혀 있으면 아무 것도 안 함
+      const buffers = buffersRef.current || {};
+      if (Object.keys(buffers).length === 0) {
+        if (monitorStateRef.current.label !== "") {
+          monitorStateRef.current = { lastK: -1, label: "" };
+          el.textContent = "♫ 지금: —";
+        }
+        return;
+      }
+      const t = currentPositionLive();
+      const k = Math.floor((t - MONITOR_DUR) / MONITOR_HOP);
+      const st = monitorStateRef.current;
+      if (k < 0) return;
+      if (k < st.lastK) { st.lastK = k; return; } // 뒤로 시크 → 재고정
+      if (k === st.lastK) return; // 새로 완료된 프레임 없음 (정지 중 포함)
+      // 큰 점프(시크)면 백로그를 버리고 현재 위치부터
+      const start = st.lastK < 0 || k - st.lastK > 6 ? k : Math.max(st.lastK + 1, 0);
+      const end = Math.min(k, start + 1); // 틱당 최대 2프레임 (버스트 방지)
+      let label = st.label;
+      for (let kk = start; kk <= end; kk++) {
+        try {
+          const guess = detectChordAtTime(buffers, kk * MONITOR_HOP, {
+            keyTonic: keyTonic || null,
+            keyMode,
+            semitones,
+            pref: prefFromChordText(chordsText),
+            durSec: MONITOR_DUR,
+          });
+          if (guess?.label) label = guess.label;
+        } catch {
+          // 프레임 분석 실패 시 이전 라벨 유지
+        }
+      }
+      st.lastK = k;
+      if (label) {
+        st.label = label;
+        el.textContent = `♫ 지금: ${label}`;
+      }
+    }, 300);
+    return () => clearInterval(iv);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [keyTonic, keyMode, semitones, chordsText]);
+
   // 표시 전용 코드 키 조절 (오디오 무관 — 화면의 코드만 이동). -11..+11, 저장 안 함.
   // 리셋 조건: 곡 로드(loadFromUrl) / transpose 적용(우선권) / 앱 종료(자연 소멸)
   const [keyAdj, setKeyAdj] = useState(0);
@@ -3139,6 +3193,13 @@ export default function KaraokePage() {
               >
                 {chordDetectBusy ? "분석 중…" : "♪ 스탬프+코드"}
               </button>
+              <span
+                ref={monitorChipRef}
+                className="ml-1 text-xs text-emerald-300/90 tabular-nums whitespace-nowrap"
+                title="상시 코드 디텍터 (0.3초 격자, 최근 1.0초 창) — 재생 중 실시간 갱신. 참고용 표시이며 ♪ 스탬프+코드는 누른 순간을 별도 분석"
+              >
+                ♫ 지금: —
+              </span>
               <button
                 onClick={newlineInChordsEditor}
                 className="px-2 py-1 rounded-md border border-zinc-700 text-zinc-200 text-xs hover:bg-zinc-800"
