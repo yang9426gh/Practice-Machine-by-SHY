@@ -279,6 +279,37 @@ export function detectChordAtTime(
     }
   }
 
+  // Pedal-resistant bass support: what matters is where the bass JUST MOVED TO, not
+  // what it currently rings (a held C pedal under Bb chords used to flip Bb -> C).
+  // support = relu(b - baseline) where baseline = bass chroma over [t-4.5, t-1.2].
+  // Songs shorter than the baseline window fall back to raw bass support.
+  let bSup: Float32Array | null = null;
+  if (b) {
+    bSup = b;
+    if (tSec >= 1.7 && bassBuf) {
+      const bStart = Math.max(0, tSec - 4.5);
+      const bEnd = Math.max(bStart + 0.5, tSec - 1.2);
+      const baseC = chromaOfWindow(monoMixCached(bassBuf), bassBuf.sampleRate, bStart, bEnd - bStart,
+        { fmin: BASS_FMIN, fmax: BASS_FMAX, expo: BASS_EXPO, harm: true, frameL1: true });
+      if (baseC) {
+        let bmx = 0;
+        for (let i = 0; i < 12; i++) bmx = Math.max(bmx, baseC[i]);
+        if (bmx > 1e-9) {
+          const d = new Float32Array(12);
+          let mx = 0;
+          for (let i = 0; i < 12; i++) {
+            d[i] = Math.max(0, b[i] - baseC[i] / bmx);
+            mx = Math.max(mx, d[i]);
+          }
+          if (mx > 1e-9) {
+            for (let i = 0; i < 12; i++) d[i] /= mx;
+            bSup = d;
+          }
+        }
+      }
+    }
+  }
+
   // score = cosine(upper, template) - prior - complexity penalty + W_BASS * bass support
   let bestIdx = -1, bestScore = -Infinity, secondScore = -Infinity;
   for (let i = 0; i < TPLS.length; i++) {
@@ -288,11 +319,11 @@ export function detectChordAtTime(
     s -= QUAL_PRIOR[t.q] * PRIOR_SCALE;
     const extra = Math.max(0, CHORD_TONES[t.q].length - 3);
     s -= PENALTY * extra;
-    if (b && W_BASS > 0) {
-      let sup = b[t.root];
+    if (bSup && W_BASS > 0) {
+      let sup = bSup[t.root];
       for (const off of CHORD_TONES[t.q]) {
         if (off === 0) continue;
-        sup = Math.max(sup, TONE_W * b[(t.root + off) % 12]);
+        sup = Math.max(sup, TONE_W * bSup[(t.root + off) % 12]);
       }
       s += W_BASS * sup;
     }
