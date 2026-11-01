@@ -6,6 +6,7 @@ import { Play, Pause, ChevronUp, ChevronDown, Maximize, Minimize } from "lucide-
 import { BrandHeader, SupportButton } from "../components/Brand";
 import { busForStem, type BusName } from "../lib/mixRouting";
 import { loadSettings } from "../lib/settings";
+import { detectChordAtTime, prefFromChordText } from "../lib/chordDetect";
 
 const BACKEND = process.env.NEXT_PUBLIC_BACKEND_URL || (typeof window !== "undefined" ? window.location.origin : "http://localhost:8011");
 
@@ -429,14 +430,15 @@ export default function KaraokePage() {
     const v = kind === "chord" ? s.chordStampOffsetSec : s.lyricStampOffsetSec;
     return Number.isFinite(v) ? v : -0.25;
   };
-  const stampChordAtCursor = () => {
+  const stampChordAtCursor = (chord?: string | null) => {
     const el = document.getElementById("chords-edit-area") as HTMLTextAreaElement | null;
     const t = Math.max(0, currentPositionLive() + stampOffset("chord"));
     const mm = Math.floor(t / 60);
     const ss = t - mm * 60;
     const stamp = `[${String(mm).padStart(2, "0")}:${ss.toFixed(2).padStart(5, "0")}]`;
+    const ins = stamp + (chord ? ` ${chord}` : "");
     if (!el) {
-      setChordsText((prev) => (prev ? `${prev.replace(/\s*$/, "")} ${stamp} ` : `${stamp} `));
+      setChordsText((prev) => (prev ? `${prev.replace(/\s*$/, "")} ${ins} ` : `${ins} `));
       return;
     }
     const start = el.selectionStart ?? chordsText.length;
@@ -444,6 +446,20 @@ export default function KaraokePage() {
     const text = chordsText;
     const before = text.slice(0, start);
     const after = text.slice(end);
+    // 코드 모드: 바로 앞이 "빈 스탬프"(미리 찍어둔 것)면 새 스탬프를 추가하지 않고 거기에 코드를 붙임
+    const mEmpty = chord ? before.match(/\[\d{1,3}:\d{1,2}(?:[.:]\d{1,3})?\][ \t]*$/) : null;
+    if (mEmpty) {
+      const s0 = start - mEmpty[0].length;
+      const insStr = mEmpty[0].replace(/[ \t]+$/, "") + " " + chord + " ";
+      const newText = text.slice(0, s0) + insStr + after;
+      const caret = s0 + insStr.length;
+      setChordsText(newText);
+      requestAnimationFrame(() => {
+        el.focus();
+        el.setSelectionRange(caret, caret);
+      });
+      return;
+    }
     // 바로 앞이 "코드가 붙은 스탬프"면 재찍기(교체) — 잘못 찍은 스탬프 정리용.
     // 빈 스탬프(뒤에 코드 없이 공백/줄끝)면 그대로 두고 새 스탬프 추가.
     const m = before.match(/\[\d{1,3}:\d{1,2}(?:[.:]\d{1,3})?\][^\s\[]*$/);
@@ -451,19 +467,48 @@ export default function KaraokePage() {
     let caret: number;
     if (m) {
       const s0 = start - m[0].length;
-      newText = text.slice(0, s0) + stamp + " " + after;
-      caret = s0 + stamp.length + 1;
+      newText = text.slice(0, s0) + ins + " " + after;
+      caret = s0 + ins.length + 1;
     } else {
       const prevCh = start > 0 ? text[start - 1] : "\n";
       const pad = start === 0 || /\s/.test(prevCh) ? "" : " ";
-      newText = before + pad + stamp + " " + after;
-      caret = start + pad.length + stamp.length + 1;
+      newText = before + pad + ins + " " + after;
+      caret = start + pad.length + ins.length + 1;
     }
     setChordsText(newText);
     requestAnimationFrame(() => {
       el.focus();
       el.setSelectionRange(caret, caret);
     });
+  };
+
+  // ♪ 스탬프+코드: 재생 순간의 코드를 분석해 타임스탬프와 함께 삽입.
+  // 감지는 메모리의 디코드된 스템 버퍼에서 수행 (lib/chordDetect) — 편집 보조용 추정값.
+  const [chordDetectBusy, setChordDetectBusy] = useState(false);
+  const stampChordDetectAtCursor = () => {
+    const buffers = buffersRef.current || {};
+    if (Object.keys(buffers).length === 0) {
+      toast("스템이 로드된 곡에서 사용할 수 있어요");
+      return;
+    }
+    const t = Math.max(0, currentPositionLive() + stampOffset("chord"));
+    let chord: string | null = null;
+    setChordDetectBusy(true);
+    try {
+      const guess = detectChordAtTime(buffers, t, {
+        keyTonic: keyTonic || null,
+        keyMode,
+        semitones,
+        pref: prefFromChordText(chordsText),
+      });
+      if (guess?.label) chord = guess.label;
+    } catch {
+      // 감지 실패 시 스탬프만 삽입 (기존 워크플로 유지)
+    } finally {
+      setChordDetectBusy(false);
+    }
+    stampChordAtCursor(chord);
+    if (!chord) toast("코드 분석 실패 — 타임스탬프만 삽입됨");
   };
 
   // 코드 편집창 줄바꿈 버튼 — 커서 위치에서 엔터와 동일
@@ -3080,11 +3125,19 @@ export default function KaraokePage() {
               </div>
               <div className="flex-1" />
               <button
-                onClick={stampChordAtCursor}
+                onClick={() => stampChordAtCursor()}
                 className="px-2 py-1 rounded-md border border-emerald-700 text-emerald-200 text-xs hover:bg-emerald-950/30"
                 title="텍스트 커서 위치에 현재 재생 시간의 타임스탬프 삽입 (빈 스탬프 연타 가능 — 나중에 코드 채우기)"
               >
                 ⏱ 스탬프
+              </button>
+              <button
+                onClick={() => stampChordDetectAtCursor()}
+                disabled={chordDetectBusy}
+                className="px-2 py-1 rounded-md border border-emerald-700 text-emerald-200 text-xs hover:bg-emerald-950/30 disabled:opacity-50"
+                title="현재 재생 순간의 코드를 분석해 타임스탬프와 함께 삽입 (스템 기반 추정 — 이후 수정 가능). 바로 앞의 빈 스탬프에 코드가 붙음"
+              >
+                {chordDetectBusy ? "분석 중…" : "♪ 스탬프+코드"}
               </button>
               <button
                 onClick={newlineInChordsEditor}
