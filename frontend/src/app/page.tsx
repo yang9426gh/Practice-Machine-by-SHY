@@ -2685,13 +2685,30 @@ export default function KaraokePage() {
                 setIsScrubbing(true);
                 setScrubPos(v);
               }}
-              onMouseUp={async () => {
-                setIsScrubbing(false);
-                await seekTo(scrubPos);
+              onPointerDown={(e) => {
+                // 포인터 캡처: 바 밖에서 놓아도 pointerup이 이 인풋으로 전달됨 — 놓는 위치가 바를 벗어나도 시크 보장
+                try { e.currentTarget.setPointerCapture(e.pointerId); } catch {}
               }}
-              onTouchEnd={async () => {
+              onPointerUp={(e) => {
                 setIsScrubbing(false);
-                await seekTo(scrubPos);
+                // state 클로저(scrubPos) 대신 DOM 값 직접 읽기 — 빠른 드래그에서 마지막 change 커밋 전에 놓아도 최신 값으로 시크
+                void seekTo(Number(e.currentTarget.value));
+              }}
+              onPointerCancel={() => {
+                // 드래그 취소(포인터 무효화): 시크하지 않고 현재 재생 위치로 복귀
+                setIsScrubbing(false);
+                setScrubPos(uiPos);
+              }}
+              onBlur={() => {
+                // 안전망: 포커스 이탈로 스크럽이 멈춰있는 상태 방지
+                setIsScrubbing(false);
+              }}
+              onKeyUp={(e) => {
+                // 키보드 조작(화살표 등)도 즉시 시크 — mouseup 없이 isScrubbing 고정되는 것 방지
+                if (["ArrowLeft", "ArrowRight", "Home", "End", "PageUp", "PageDown"].includes(e.key)) {
+                  setIsScrubbing(false);
+                  void seekTo(Number(e.currentTarget.value));
+                }
               }}
               disabled={!audioReady}
               className={`flex-1 ${audioReady ? "" : "opacity-50"}`}
