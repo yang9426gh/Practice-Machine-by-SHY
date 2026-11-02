@@ -6,7 +6,7 @@ import { Play, Pause, ChevronUp, ChevronDown, Maximize, Minimize } from "lucide-
 import { BrandHeader, SupportButton } from "../components/Brand";
 import { busForStem, type BusName } from "../lib/mixRouting";
 import { loadSettings } from "../lib/settings";
-import { detectChordAtTime, prefFromChordText, spellPc, keyAccidentalPref } from "../lib/chordDetect";
+import { prefFromChordText, spellPc, keyAccidentalPref } from "../lib/chordDetect";
 
 const BACKEND = process.env.NEXT_PUBLIC_BACKEND_URL || (typeof window !== "undefined" ? window.location.origin : "http://localhost:8011");
 
@@ -482,35 +482,6 @@ export default function KaraokePage() {
     });
   };
 
-  // ♪ 스탬프+코드: 재생 순간의 코드를 분석해 타임스탬프와 함께 삽입.
-  // 감지는 메모리의 디코드된 스템 버퍼에서 수행 (lib/chordDetect) — 편집 보조용 추정값.
-  const [chordDetectBusy, setChordDetectBusy] = useState(false);
-  const stampChordDetectAtCursor = () => {
-    const buffers = buffersRef.current || {};
-    if (Object.keys(buffers).length === 0) {
-      toast("스템이 로드된 곡에서 사용할 수 있어요");
-      return;
-    }
-    const t = Math.max(0, currentPositionLive() + stampOffset("chord"));
-    let chord: string | null = null;
-    setChordDetectBusy(true);
-    try {
-      const guess = detectChordAtTime(buffers, t, {
-        keyTonic: keyTonic || null,
-        keyMode,
-        semitones,
-        pref: prefFromChordText(chordsText),
-      });
-      if (guess?.label) chord = guess.label;
-    } catch {
-      // 감지 실패 시 스탬프만 삽입 (기존 워크플로 유지)
-    } finally {
-      setChordDetectBusy(false);
-    }
-    stampChordAtCursor(chord);
-    if (!chord) toast("코드 분석 실패 — 타임스탬프만 삽입됨");
-  };
-
   // 코드 편집창 줄바꿈 버튼 — 커서 위치에서 엔터와 동일
   const newlineInChordsEditor = () => {
     const el = document.getElementById("chords-edit-area") as HTMLTextAreaElement | null;
@@ -529,9 +500,8 @@ export default function KaraokePage() {
   };
 
   // ✦ BTC 초안: 사전학습 모델(BTC)의 전곡 코드 타임라인(오프라인 분석 사이드카)으로 편집창을 채움.
-  // 초안이므로 들어보고 고친 뒤 저장하는 용도. 되돌리기 버튼이 채우기 이전 내용을 보관.
+  // 초안이므로 들어보고 고친 뒤 저장하는 용도.
   const [btcDraftBusy, setBtcDraftBusy] = useState(false);
-  const [btcUndo, setBtcUndo] = useState<string | null>(null);
   const btcDraftFill = async () => {
     if (btcDraftBusy) return;
     setBtcDraftBusy(true);
@@ -584,17 +554,11 @@ export default function KaraokePage() {
       for (let i = 0; i < parts.length; i += 4) lines.push(parts.slice(i, i + 4).map((p) => p.s).join(""));
       const draft = lines.join("\n");
       if (chordsText.trim() && !confirm("현재 코드 내용을 BTC 초안으로 교체할까요?")) return;
-      setBtcUndo(chordsText);
       setChordsText(draft);
       toast("BTC 초안 채움 — 들어보고 고친 뒤 저장하세요");
     } finally {
       setBtcDraftBusy(false);
     }
-  };
-  const btcUndoRestore = () => {
-    if (btcUndo === null) return;
-    setChordsText(btcUndo);
-    setBtcUndo(null);
   };
 
   const videoWrapRef = useRef<HTMLDivElement | null>(null);
@@ -1190,59 +1154,6 @@ export default function KaraokePage() {
   };
 
   const [semitones, setSemitones] = useState(0); // applied
-
-  // ♫ 상시 코드 디텍터 모니터 (0.3초 격자) — 재생 구간을 0.3초 격자 프레임으로 나눠
-  // 각 프레임 [g, g+1.0s]이 완전히 지나간 직후 분석해 칩에 표시 ("최근 1초에 들린 코드").
-  // 3Hz 리렌더를 피하려고 React state 대신 ref.textContent를 직접 갱신.
-  const monitorChipRef = useRef<HTMLSpanElement | null>(null);
-  const monitorStateRef = useRef<{ lastK: number; label: string }>({ lastK: -1, label: "" });
-  useEffect(() => {
-    const MONITOR_HOP = 0.3;
-    const MONITOR_DUR = 1.0;
-    const iv = setInterval(() => {
-      const el = monitorChipRef.current;
-      if (!el) return; // 코드 편집 영역이 닫혀 있으면 아무 것도 안 함
-      const buffers = buffersRef.current || {};
-      if (Object.keys(buffers).length === 0) {
-        if (monitorStateRef.current.label !== "") {
-          monitorStateRef.current = { lastK: -1, label: "" };
-          el.textContent = "♫ 지금: —";
-        }
-        return;
-      }
-      const t = currentPositionLive();
-      const k = Math.floor((t - MONITOR_DUR) / MONITOR_HOP);
-      const st = monitorStateRef.current;
-      if (k < 0) return;
-      if (k < st.lastK) { st.lastK = k; return; } // 뒤로 시크 → 재고정
-      if (k === st.lastK) return; // 새로 완료된 프레임 없음 (정지 중 포함)
-      // 큰 점프(시크)면 백로그를 버리고 현재 위치부터
-      const start = st.lastK < 0 || k - st.lastK > 6 ? k : Math.max(st.lastK + 1, 0);
-      const end = Math.min(k, start + 1); // 틱당 최대 2프레임 (버스트 방지)
-      let label = st.label;
-      for (let kk = start; kk <= end; kk++) {
-        try {
-          const guess = detectChordAtTime(buffers, kk * MONITOR_HOP, {
-            keyTonic: keyTonic || null,
-            keyMode,
-            semitones,
-            pref: prefFromChordText(chordsText),
-            durSec: MONITOR_DUR,
-          });
-          if (guess?.label) label = guess.label;
-        } catch {
-          // 프레임 분석 실패 시 이전 라벨 유지
-        }
-      }
-      st.lastK = k;
-      if (label) {
-        st.label = label;
-        el.textContent = `♫ 지금: ${label}`;
-      }
-    }, 300);
-    return () => clearInterval(iv);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [keyTonic, keyMode, semitones, chordsText]);
 
   // 표시 전용 코드 키 조절 (오디오 무관 — 화면의 코드만 이동). -11..+11, 저장 안 함.
   // 리셋 조건: 곡 로드(loadFromUrl) / transpose 적용(우선권) / 앱 종료(자연 소멸)
@@ -3255,37 +3166,13 @@ export default function KaraokePage() {
                 ⏱ 스탬프
               </button>
               <button
-                onClick={() => stampChordDetectAtCursor()}
-                disabled={chordDetectBusy}
-                className="px-2 py-1 rounded-md border border-emerald-700 text-emerald-200 text-xs hover:bg-emerald-950/30 disabled:opacity-50"
-                title="현재 재생 순간의 코드를 분석해 타임스탬프와 함께 삽입 (스템 기반 추정 — 이후 수정 가능). 바로 앞의 빈 스탬프에 코드가 붙음"
-              >
-                {chordDetectBusy ? "분석 중…" : "♪ 스탬프+코드"}
-              </button>
-              <button
                 onClick={btcDraftFill}
                 disabled={btcDraftBusy}
                 className="px-2 py-1 rounded-md border border-indigo-700 text-indigo-200 text-xs hover:bg-indigo-950/30 disabled:opacity-50"
-                title="사전학습 모델(BTC)의 전곡 분석 결과로 편집창을 통째로 채움 — 초안이므로 들어보고 고친 뒤 저장. 되돌리기 가능"
+                title="사전학습 모델(BTC)의 전곡 분석 결과로 편집창을 통째로 채움 — 초안이므로 들어보고 고친 뒤 저장"
               >
                 {btcDraftBusy ? "가져오는 중…" : "✦ BTC 초안"}
               </button>
-              {btcUndo !== null ? (
-                <button
-                  onClick={btcUndoRestore}
-                  className="px-2 py-1 rounded-md border border-amber-700 text-amber-200 text-xs hover:bg-amber-950/30"
-                  title="BTC 초안 채우기 이전 내용으로 되돌리기"
-                >
-                  ↺ 되돌리기
-                </button>
-              ) : null}
-              <span
-                ref={monitorChipRef}
-                className="ml-1 text-xs text-emerald-300/90 tabular-nums whitespace-nowrap"
-                title="상시 코드 디텍터 (0.3초 격자, 최근 1.0초 창) — 재생 중 실시간 갱신. 참고용 표시이며 ♪ 스탬프+코드는 누른 순간을 별도 분석"
-              >
-                ♫ 지금: —
-              </span>
               <button
                 onClick={newlineInChordsEditor}
                 className="px-2 py-1 rounded-md border border-zinc-700 text-zinc-200 text-xs hover:bg-zinc-800"
