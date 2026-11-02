@@ -579,7 +579,10 @@ export default function KaraokePage() {
         toast("BTC 타임라인에서 유효한 코드를 못 찾았어요");
         return;
       }
-      const draft = parts.join("");
+      // 4개 코드마다 줄바꿈 (표시 줄 구분 = 줄바꿈)
+      const lines: string[] = [];
+      for (let i = 0; i < parts.length; i += 4) lines.push(parts.slice(i, i + 4).join(""));
+      const draft = lines.join("\n");
       if (chordsText.trim() && !confirm("현재 코드 내용을 BTC 초안으로 교체할까요?")) return;
       setBtcUndo(chordsText);
       setChordsText(draft);
