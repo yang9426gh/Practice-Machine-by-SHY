@@ -89,6 +89,22 @@ export default function SettingsPage() {
             onChange={(v) => patch({ lyricStampOffsetSec: clampNum(v, -LIMIT, LIMIT, DEFAULT_SETTINGS.lyricStampOffsetSec) })}
           />
         </div>
+
+        <div className="rounded-xl border border-zinc-800 bg-zinc-950/60 p-5 space-y-6">
+          <div>
+            <div className="text-sm font-semibold text-zinc-200">BTC 스탬프 채우기 타이밍 (매칭 오프셋)</div>
+            <p className="text-xs text-zinc-500 mt-1">
+              ✦ 스탬프 채우기 버튼이 BTC 데이터에서 코드를 찾을 때, 찍힌 스탬프 시각에 이 값을 더해서 조회합니다.
+              예: 스탬프 [02:23.25] + (-0.05) → [02:23.20] 기준으로 매칭. 음수 = 스탬프보다 이른 시점의 코드, 양수 = 늦은 시점의 코드.
+              0.05초 단위, 최대 ±2초.
+            </p>
+          </div>
+          <OffsetStepper
+            label="BTC stamp fill (스탬프 채우기)"
+            value={settings.btcStampFillOffsetSec}
+            onChange={(v) => patch({ btcStampFillOffsetSec: clampNum(v, -LIMIT, LIMIT, DEFAULT_SETTINGS.btcStampFillOffsetSec) })}
+          />
+        </div>
       </div>
     </main>
   );

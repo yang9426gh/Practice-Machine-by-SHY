@@ -8,6 +8,7 @@ export type UiSettings = {
   vignetteSides: number;    // 0..1
   chordStampOffsetSec: number; // 스탬프 오프셋(초): 음수=그만큼 더 일찍 기록, 양수=더 늦게 기록
   lyricStampOffsetSec: number; // 〃 가사 스탬프
+  btcStampFillOffsetSec: number; // 스탬프 채우기 매칭 오프셋(초): 스탬프 시각 + 이 값으로 BTC 타임라인 조회
 };
 
 export const DEFAULT_SETTINGS: UiSettings = {
@@ -20,6 +21,7 @@ export const DEFAULT_SETTINGS: UiSettings = {
   vignetteSides: 0.55,
   chordStampOffsetSec: -0.25,
   lyricStampOffsetSec: -0.25,
+  btcStampFillOffsetSec: 0,
 };
 
 // 숫자 설정값 방어: 문자/null/NaN/범위 밖이 저장돼도 fallback 또는 clamp로 복귀 (소수 2자리 반올림)
@@ -49,6 +51,7 @@ export function loadSettings(): UiSettings {
     }
     merged.chordStampOffsetSec = clampNum(merged.chordStampOffsetSec, -2, 2, DEFAULT_SETTINGS.chordStampOffsetSec);
     merged.lyricStampOffsetSec = clampNum(merged.lyricStampOffsetSec, -2, 2, DEFAULT_SETTINGS.lyricStampOffsetSec);
+    merged.btcStampFillOffsetSec = clampNum(merged.btcStampFillOffsetSec, -2, 2, DEFAULT_SETTINGS.btcStampFillOffsetSec);
     return merged;
   } catch {
     return DEFAULT_SETTINGS;
