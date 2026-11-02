@@ -897,8 +897,11 @@ export default function KaraokePage() {
     const re = /\[(\d{1,3}):(\d{1,2}(?:[.:]\d{1,3})?)\]/g;
     let m: RegExpExecArray | null;
     while ((m = re.exec(line)) !== null) {
-      // 클릭 지점이 스탬프 토큰 내부(선행 [ 제외, 마지막 글자 포함)인지
-      if (off >= m.index + 1 && off <= m.index + m[0].length) {
+      // 히트 존 = 스탬프 토큰 전체([ 포함, ] 포함) + 바로 앞 공백 1자(왼쪽에서 살짝 못 찍은 클릭 흡수).
+      // BTC 초안처럼 코드가 스탬프에 바로 붙는 형식(G[00:10.00])에서 앞 괄호를 노리면
+      // 캐럿이 [ 위에 놓이는데, 첫 [ 를 제외하면 시크가 안 돼 "타임스탬프 눌러도 안 내려가는" 버그가 됐다.
+      const lead = m.index > 0 && /[ \t]/.test(line[m.index - 1]) ? 1 : 0;
+      if (off >= m.index - lead && off <= m.index + m[0].length) {
         const t = parseInt(m[1], 10) * 60 + parseFloat(m[2].replace(":", "."));
         if (isFinite(t)) void seekTo(Math.max(0, t));
         break;
