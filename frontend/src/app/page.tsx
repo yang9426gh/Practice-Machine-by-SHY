@@ -615,7 +615,7 @@ export default function KaraokePage() {
           const t = parseInt(mm, 10) * 60 + parseFloat(ss.replace(":", "."));
           if (!isFinite(t)) return full;
           const token = chordAt(t);
-          if (!token) { missed++; return full; }
+          if (!token) { missed++; return `${full} ?`; } // 매칭 실패는 빈칸 대신 ? 표시 — 나중에 수동 확인용
           filled++;
           return `${full} ${token}`;
         }
@@ -624,8 +624,10 @@ export default function KaraokePage() {
         toast("채울 빈 스탬프가 없어요 — 이미 코드가 붙은 스탬프만 있어요");
         return;
       }
-      if (filled) setChordsText(newText);
-      toast(filled ? `빈 스탬프 ${filled}개 채움${missed ? ` — 매칭 못한 ${missed}개는 비워둠` : ""}` : `${missed}개 스탬프 시각에 매칭되는 코드가 없어요`);
+      setChordsText(newText);
+      toast(filled
+        ? `빈 스탬프 ${filled}개 채움${missed ? ` — 매칭 못한 ${missed}개는 ? 표시` : ""}`
+        : `매칭 못한 ${missed}개 스탬프는 ? 표시로 남김`);
     } finally {
       setBtcStampFillBusy(false);
     }
@@ -3242,7 +3244,7 @@ export default function KaraokePage() {
                 onClick={btcFillStamps}
                 disabled={btcStampFillBusy}
                 className="px-2 py-1 rounded-md border border-indigo-700 text-indigo-200 text-xs hover:bg-indigo-950/30 disabled:opacity-50"
-                title="편집창의 빈 스탬프([mm:ss])에 BTC 전곡 분석 데이터에서 그 시각의 코드를 찾아 붙임 — 이미 코드가 붙은 스탬프는 건드리지 않음. 워크플로: ⏱으로 타이밍 먼저 찍기 → 이 버튼으로 코드 채우기"
+                title="편집창의 빈 스탬프([mm:ss])에 BTC 전곡 분석 데이터에서 그 시각의 코드를 찾아 붙임 — 이미 코드가 붙은 스탬프는 건드리지 않고, 매칭 실패한 스탬프는 ? 표시. 워크플로: ⏱으로 타이밍 먼저 찍기 → 이 버튼으로 코드 채우기"
               >
                 {btcStampFillBusy ? "채우는 중…" : "✦ 스탬프 채우기"}
               </button>
