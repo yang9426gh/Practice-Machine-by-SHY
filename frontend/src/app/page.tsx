@@ -58,6 +58,22 @@ const transposeChordText = (text: string, delta: number): string => {
     .join("/");
 };
 
+// 스탬프([mm:ss.xx])와 코드가 섞인 편집기 텍스트 전체를 이동.
+// 코드 토큰만 이동하고 타임스탬프 / "-" / "?" 같은 표기는 그대로 둔다 (transposeChordText는 단일 토큰용).
+const transposeLrcText = (text: string, delta: number): string => {
+  if (!delta) return text;
+  const chordTok = /^[A-G][#b♯♭]?((maj|min|dim|aug|sus|add|m|M)([0-9]*(b5|#5|b9|#9|#11|b13)?)?|[0-9]+)?(\/[A-G][#b♯♭]?)?$/;
+  return text
+    .split("\n")
+    .map((line) =>
+      line
+        .split(" ")
+        .map((tok) => (!tok || tok.startsWith("[") || !chordTok.test(tok) ? tok : transposeChordText(tok, delta)))
+        .join(" "),
+    )
+    .join("\n");
+};
+
 type Preset = {
   id: string;
   name: string;
@@ -343,6 +359,11 @@ export default function KaraokePage() {
   const [chords, setChords] = useState<ChordsState>(null);
   const [chordsShow, setChordsShow] = useState(true);          // 코드 스트립 on/off
   const [chordsOpen, setChordsOpen] = useState(false);         // 모달: 만들기/편집
+  // 편집창은 현재 표시 키(semitones+keyAdj 이동된 코드명)로 열리고, 저장/닫을 때 원래 키로 되돌림.
+  // base = 편집 시작 시점의 표시 이동량, raw = 서버 원문(원래 키). → transpose 상태에서 코드를 집어 넣어도
+  // transpose를 빼면 ±0이 되도록(들린 코드명이 그대로 유지됨).
+  const editTransBaseRef = useRef(0);
+  const editRawRef = useRef("");
   const [chordsMode, setChordsMode] = useState<"create" | "edit">("create");
   const [chordsText, setChordsText] = useState("");
   const [chordsSaving, setChordsSaving] = useState(false);
@@ -396,24 +417,29 @@ export default function KaraokePage() {
   }, [chords, chordActiveIdx, uiPos, isScrubbing, scrubPos]);
 
   const openChordsEditor = async (mode: "create" | "edit") => {
+    let raw = "";
     if (mode === "edit" && videoId) {
       // 최신 원문을 서버에서 다시 읽어 편집기에 반영
       try {
         const r = await fetch(`${BACKEND}/chords/${videoId}`);
-        if (r.ok) setChordsText((await r.json()).lrc || "");
-        else setChordsText(chords?.lrc || "");
+        raw = r.ok ? (await r.json()).lrc || "" : (chords?.lrc || "");
       } catch {
-        setChordsText(chords?.lrc || "");
+        raw = chords?.lrc || "";
       }
-    } else {
-      setChordsText("");
     }
+    // 표시 키(transpose + 키조절)가 적용된 코드명으로 편집창을 엶 — 재생 중 표시되는 코드와 동일하게
+    const base = semitones + keyAdj;
+    editTransBaseRef.current = base;
+    editRawRef.current = raw;
+    setChordsText(base ? transposeLrcText(raw, base) : raw);
     setChordsMode(mode);
     setChordsOpen(true);
   };
 
   const chordsSave = async () => {
-    const text = chordsText.trim();
+    // 편집창 내용은 표시 키로 이동된 상태 — 저장 시 원래 키로 역변환 (transpose를 빼면 ±0)
+    const base = editTransBaseRef.current;
+    const text = (base ? transposeLrcText(chordsText.trim(), -base) : chordsText.trim());
     if (!text) return;
     if (!/\[\d{1,3}:\d{1,2}/.test(text)) {
       toast("타임스탬프가 없습니다 — [mm:ss.xx] 코드 형식 필요");
@@ -430,6 +456,7 @@ export default function KaraokePage() {
       if (r.ok && j.lines?.length) {
         setChords({ lines: j.lines, offsetMs: j.offset_ms || 0, lrc: text, source: chords?.source || "직접 입력" });
         setChordsShow(true);
+        setChordsText(text); // 편집창 상태를 원래 키 기준으로 정리
         setChordsOpen(false);
         toast(`코드 저장 완료 (${j.lines.length}줄)`);
       } else {
@@ -614,7 +641,8 @@ export default function KaraokePage() {
           const token = chordAt(t);
           if (!token) { missed++; return `${full} -`; } // 매칭 실패는 빈칸 대신 - 표시 — 나중에 수동 확인용
           filled++;
-          return `${full} ${token}`;
+          // 편집창이 표시 키(transpose+키조절) 상태면 삽입할 코드도 같은 이동량 적용
+          return `${full} ${editTransBaseRef.current ? transposeChordText(token, editTransBaseRef.current) : token}`;
         }
       );
       if (!filled && !missed) {
@@ -3209,14 +3237,14 @@ export default function KaraokePage() {
       ) : null}
 
       {chordsOpen ? (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-4" onMouseDown={(e) => { if (e.target === e.currentTarget) setChordsOpen(false); }}>
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-4" onMouseDown={(e) => { if (e.target === e.currentTarget) { setChordsOpen(false); setChordsText(editRawRef.current); } }}>
           <div
             className="w-full max-w-2xl rounded-2xl border border-zinc-800 bg-zinc-950 p-5 space-y-4 max-h-[85vh] overflow-auto"
             onClick={(e) => e.stopPropagation()}
           >
             <div className="flex items-center justify-between">
               <div className="text-lg font-bold text-zinc-100">{chordsMode === "edit" ? "코드 편집" : "코드 만들기"}</div>
-              <button onClick={() => setChordsOpen(false)} className="text-zinc-500 hover:text-zinc-200 text-sm px-2">✕</button>
+              <button onClick={() => { setChordsOpen(false); setChordsText(editRawRef.current); }} className="text-zinc-500 hover:text-zinc-200 text-sm px-2">✕</button>
             </div>
 
             <div className="text-xs text-zinc-500">
@@ -3292,6 +3320,7 @@ export default function KaraokePage() {
                     await fetch(`${BACKEND}/chords/${videoId}`, { method: "DELETE" });
                     setChords(null);
                     setChordsOpen(false);
+                    setChordsText("");
                     toast("코드 삭제됨");
                   }}
                   className="px-3 py-2 rounded-lg border border-red-900/60 text-red-300 text-sm"
