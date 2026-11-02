@@ -557,7 +557,7 @@ export default function KaraokePage() {
         9: "", min9: "m", maj9: "", 11: "", min11: "m", 13: "",
       };
       const PC_BASE: Record<string, number> = { C: 0, D: 2, E: 4, F: 5, G: 7, A: 9, B: 11 };
-      const parts: string[] = [];
+      const parts: Array<{ t: number; s: string }> = [];
       let lastKey = "";
       for (const s of segs) {
         const ch = (s.chord || "").trim();
@@ -573,16 +573,33 @@ export default function KaraokePage() {
         lastKey = key;
         const mm = String(Math.floor(s.start / 60)).padStart(2, "0");
         const ss = (s.start % 60).toFixed(2).padStart(5, "0");
-        parts.push(`[${mm}:${ss}] ${spellPc(pc, pref)}${q}`);
+        parts.push({ t: s.start, s: `[${mm}:${ss}] ${spellPc(pc, pref)}${q}` });
       }
       if (!parts.length) {
         toast("BTC 타임라인에서 유효한 코드를 못 찾았어요");
         return;
       }
-      // 4개 코드마다 줄바꿈 (표시 줄 구분 = 줄바꿈)
-      const lines: string[] = [];
-      for (let i = 0; i < parts.length; i += 4) lines.push(parts.slice(i, i + 4).join(""));
-      const draft = lines.join("\n");
+      // 줄 그룹핑: BPM 있으면 4박 마디 단위로 한 줄, 없으면 4코드씩
+      const bpmNum = parseFloat(bpm);
+      let draft: string;
+      if (bpmNum > 10 && isFinite(bpmNum)) {
+        const barDur = (60 / bpmNum) * 4;
+        const byBar = new Map<number, string[]>();
+        for (const p of parts) {
+          const bi = Math.max(0, Math.floor(p.t / barDur));
+          const arr = byBar.get(bi);
+          if (arr) arr.push(p.s);
+          else byBar.set(bi, [p.s]);
+        }
+        draft = [...byBar.keys()]
+          .sort((a, b) => a - b)
+          .map((bi) => (byBar.get(bi) || []).join(""))
+          .join("\n");
+      } else {
+        const lines: string[] = [];
+        for (let i = 0; i < parts.length; i += 4) lines.push(parts.slice(i, i + 4).map((p) => p.s).join(""));
+        draft = lines.join("\n");
+      }
       if (chordsText.trim() && !confirm("현재 코드 내용을 BTC 초안으로 교체할까요?")) return;
       setBtcUndo(chordsText);
       setChordsText(draft);
