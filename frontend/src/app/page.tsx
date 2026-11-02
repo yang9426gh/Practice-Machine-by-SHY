@@ -588,7 +588,7 @@ export default function KaraokePage() {
       // 매칭 오프셋: 설정(Settings)의 BTC 스탬프 채우기 타이밍. 클릭 시점에 localStorage에서 직접 읽어 변경이 즉시 반영됨.
       // 스탬프 [02:23.25] + (-0.05) → [02:23.20] 기준으로 BTC 타임라인 조회.
       const fillOffset = loadSettings().btcStampFillOffsetSec;
-      // 이분 탐색: t가 속한 세그먼트 (start <= t < end). N/X 구간은 null → 그 스탬프는 ? 표시.
+      // 이분 탐색: t가 속한 세그먼트 (start <= t < end). N/X 구간은 null → 그 스탬프는 - 표시.
       const chordAt = (t: number): string | null => {
         const tt = t + fillOffset;
         let lo = 0, hi = segs.length - 1, idx = -1;
@@ -612,7 +612,7 @@ export default function KaraokePage() {
           const t = parseInt(mm, 10) * 60 + parseFloat(ss.replace(":", "."));
           if (!isFinite(t)) return full;
           const token = chordAt(t);
-          if (!token) { missed++; return `${full} ?`; } // 매칭 실패는 빈칸 대신 ? 표시 — 나중에 수동 확인용
+          if (!token) { missed++; return `${full} -`; } // 매칭 실패는 빈칸 대신 - 표시 — 나중에 수동 확인용
           filled++;
           return `${full} ${token}`;
         }
@@ -623,8 +623,8 @@ export default function KaraokePage() {
       }
       setChordsText(newText);
       toast(filled
-        ? `빈 스탬프 ${filled}개 채움${missed ? ` — 매칭 못한 ${missed}개는 ? 표시` : ""}`
-        : `매칭 못한 ${missed}개 스탬프는 ? 표시로 남김`);
+        ? `빈 스탬프 ${filled}개 채움${missed ? ` — 매칭 못한 ${missed}개는 - 표시` : ""}`
+        : `매칭 못한 ${missed}개 스탬프는 - 표시로 남김`);
     } finally {
       setBtcStampFillBusy(false);
     }
@@ -3265,7 +3265,7 @@ export default function KaraokePage() {
                 onClick={btcFillStamps}
                 disabled={btcStampFillBusy}
                 className="px-2 py-1 rounded-md border border-indigo-700 text-indigo-200 text-xs hover:bg-indigo-950/30 disabled:opacity-50"
-                title="편집창의 빈 스탬프([mm:ss])에 BTC 전곡 분석 데이터에서 그 시각의 코드를 찾아 붙임 — 이미 코드가 붙은 스탬프는 건드리지 않고, 매칭 실패한 스탬프는 ? 표시. 매칭 시점 오프셋은 설정에서 조절 가능. 워크플로: ⏱으로 타이밍 먼저 찍기 → 이 버튼으로 코드 채우기"
+                title="편집창의 빈 스탬프([mm:ss])에 BTC 전곡 분석 데이터에서 그 시각의 코드를 찾아 붙임 — 이미 코드가 붙은 스탬프는 건드리지 않고, 매칭 실패한 스탬프는 - 표시. 매칭 시점 오프셋은 설정에서 조절 가능. 워크플로: ⏱으로 타이밍 먼저 찍기 → 이 버튼으로 코드 채우기"
               >
                 {btcStampFillBusy ? "채우는 중…" : "✦ 스탬프 채우기"}
               </button>
