@@ -59,7 +59,6 @@ export default function LibraryPage() {
   const router = useRouter();
   const [presets, setPresets] = useState<Preset[]>([]);
   const [query, setQuery] = useState("");
-  const [loading, setLoading] = useState(false);
 
   const [sort, setSort] = useState<"recent" | "bpm_asc" | "bpm_desc" | "key_asc" | "key_desc">("recent");
 
@@ -92,15 +91,12 @@ export default function LibraryPage() {
   };
 
   const refresh = async () => {
-    setLoading(true);
     try {
       const r = await fetch(`${BACKEND}/presets?sort=${encodeURIComponent(sort)}`);
       const j = await r.json();
       setPresets((j.items || []) as Preset[]);
     } catch {
       setPresets([]);
-    } finally {
-      setLoading(false);
     }
   };
 
@@ -592,22 +588,24 @@ export default function LibraryPage() {
   return (
     <main className="min-h-screen bg-black text-white pb-24">
       <div className="sticky top-0 z-10 border-b border-zinc-800 bg-zinc-950/90 backdrop-blur">
-        <div className="max-w-6xl mx-auto px-4 py-4 flex items-center gap-3 relative">
-          <button onClick={() => router.push("/")} className="px-3 py-2 rounded-lg border border-zinc-700 text-sm">
-            Back
-          </button>
-          <div className="text-sm text-zinc-200 font-semibold">Library</div>
-          {/* 브랜드 헤더 — 상단 중앙 */}
-          <div className="absolute left-1/2 -translate-x-1/2 hidden sm:block">
+        <div className="max-w-6xl mx-auto px-4 py-4 grid grid-cols-[1fr_auto_1fr] items-center gap-2">
+          {/* 좌측: Back + 타이틀 + Support (로고 바로 왼쪽에 붙음) */}
+          <div className="flex items-center gap-3 min-w-0 flex-wrap">
+            <button onClick={() => router.push("/")} className="px-3 py-2 rounded-lg border border-zinc-700 text-sm">
+              Back
+            </button>
+            <div className="text-sm text-zinc-200 font-semibold">Library</div>
+            <div className="ml-auto">
+              <SupportButton />
+            </div>
+          </div>
+          {/* 중앙: 브랜드 헤더 — 그리드 중앙 열이라 좌우 버튼과 절대 겹치지 않음 */}
+          <div className="shrink-0">
             <BrandHeader compact />
           </div>
-          {/* Support 버튼 — 중앙 로고 바로 왼쪽 (넓은 화면에서만) */}
-          <div className="absolute right-1/2 mr-[152px] top-1/2 -translate-y-1/2 hidden md:block">
-            <SupportButton />
-          </div>
-          <div className="flex-1" />
-
-          <div className="flex rounded-lg border border-zinc-700 overflow-hidden shrink-0" role="group" aria-label="보기 방식">
+          {/* 우측: 보기 전환/정렬/Export-Import (좁으면 줄바꿈) */}
+          <div className="flex items-center gap-2 justify-end min-w-0 flex-wrap">
+            <div className="flex rounded-lg border border-zinc-700 overflow-hidden shrink-0" role="group" aria-label="보기 방식">
             <button
               onClick={() => changeView("cards")}
               aria-label="카드 보기"
@@ -650,9 +648,7 @@ export default function LibraryPage() {
           >
             Import Data
           </button>
-          <button onClick={refresh} className="px-3 py-2 rounded-lg border border-zinc-700 text-sm">
-            {loading ? "Refreshing…" : "Refresh"}
-          </button>
+          </div>
         </div>
         <div className="max-w-6xl mx-auto px-4 pb-4">
           <input
