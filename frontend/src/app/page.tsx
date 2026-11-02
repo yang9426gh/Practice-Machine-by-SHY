@@ -3243,7 +3243,15 @@ export default function KaraokePage() {
             onClick={(e) => e.stopPropagation()}
           >
             <div className="flex items-center justify-between">
-              <div className="text-lg font-bold text-zinc-100">{chordsMode === "edit" ? "코드 편집" : "코드 만들기"}</div>
+              <div className="flex items-center gap-2">
+                <div className="text-lg font-bold text-zinc-100">{chordsMode === "edit" ? "코드 편집" : "코드 만들기"}</div>
+                <span
+                  className={`text-xs px-2 py-0.5 rounded-full border ${editTransBaseRef.current === 0 ? "text-zinc-400 border-zinc-700 bg-zinc-800/60" : "text-blue-300 border-blue-700/60 bg-blue-900/30"}`}
+                  title="편집창 표시 키 — 저장 시 원래 키로 자동 역변환됩니다"
+                >
+                  {editTransBaseRef.current === 0 ? "원래 키" : `${editTransBaseRef.current > 0 ? "+" : ""}${editTransBaseRef.current} semitone`}
+                </span>
+              </div>
               <button onClick={() => { setChordsOpen(false); setChordsText(editRawRef.current); }} className="text-zinc-500 hover:text-zinc-200 text-sm px-2">✕</button>
             </div>
 
