@@ -180,6 +180,28 @@ function clampTime(t: number, duration?: number) {
   return Math.max(0, Math.min(t, d - 0.01));
 }
 
+// BTC(Harte 표기) 코드 세그먼트 문자열 → 앱 코드 토큰. N/X/파싱 불가/미지 품질은 null.
+// ✦ BTC 초안과 ✦ 스탬프 채우기가 공유 — BTC는 min7/maj7/hdim7 등 Harte 계열 명칭을 쓴다.
+function harteSegToAppChord(chord: string, pref: "flat" | "sharp"): string | null {
+  const ch = (chord || "").trim();
+  if (!ch || ch === "N" || ch === "X") return null;
+  const m = ch.match(/^([A-G])([#b]?)(?::(.*))?$/);
+  if (!m) return null;
+  const PC_BASE: Record<string, number> = { C: 0, D: 2, E: 4, F: 5, G: 7, A: 9, B: 11 };
+  const QUAL: Record<string, string | null> = {
+    maj: "", min: "m", dim: "dim", aug: "aug",
+    maj7: "maj7", min7: "m7", 7: "7", sus4: "sus4", sus2: "sus2",
+    hdim7: "m7b5", dim7: "dim",
+    maj6: "", min6: "m", minmaj7: "m", aug7: "aug", 5: "5",
+    9: "", min9: "m", maj9: "", 11: "", min11: "m", 13: "",
+  };
+  const pc = (PC_BASE[m[1]] + (m[2] === "#" ? 1 : m[2] === "b" ? -1 : 0) + 12) % 12;
+  const qraw = (m[3] || "maj").replace(/\(.*\)/, "");
+  const q = Object.prototype.hasOwnProperty.call(QUAL, qraw) ? QUAL[qraw] : null;
+  if (q === null) return null;
+  return spellPc(pc, pref) + q;
+}
+
 async function fetchArrayBufferWithProgress(
   url: string,
   onProgress: (loaded: number, total?: number) => void,
@@ -518,32 +540,16 @@ export default function KaraokePage() {
         return;
       }
       const pref = prefFromChordText(chordsText) || (keyTonic ? keyAccidentalPref(keyTonic, keyMode) : "sharp");
-      // Harte 표기 → 앱 코드 토큰 (BTC는 min7/maj7 등 Harte 계열 명칭 사용)
-      const QUAL: Record<string, string | null> = {
-        maj: "", min: "m", dim: "dim", aug: "aug",
-        maj7: "maj7", min7: "m7", 7: "7", sus4: "sus4", sus2: "sus2",
-        hdim7: "m7b5", dim7: "dim",
-        maj6: "", min6: "m", minmaj7: "m", aug7: "aug", 5: "5",
-        9: "", min9: "m", maj9: "", 11: "", min11: "m", 13: "",
-      };
-      const PC_BASE: Record<string, number> = { C: 0, D: 2, E: 4, F: 5, G: 7, A: 9, B: 11 };
       const parts: Array<{ t: number; s: string }> = [];
-      let lastKey = "";
+      let lastToken = "";
       for (const s of segs) {
-        const ch = (s.chord || "").trim();
-        if (!ch || ch === "N" || ch === "X") continue;
-        const m = ch.match(/^([A-G])([#b]?)(?::(.*))?$/);
-        if (!m) continue;
-        const pc = (PC_BASE[m[1]] + (m[2] === "#" ? 1 : m[2] === "b" ? -1 : 0) + 12) % 12;
-        const qraw = (m[3] || "maj").replace(/\(.*\)/, "");
-        const q = Object.prototype.hasOwnProperty.call(QUAL, qraw) ? QUAL[qraw] : null;
-        if (q === null) continue;
-        const key = `${pc}|${q}`;
-        if (key === lastKey) continue; // 동일 코드 연속 병합
-        lastKey = key;
+        const token = harteSegToAppChord(s.chord, pref);
+        if (!token) continue;
+        if (token === lastToken) continue; // 동일 코드 연속 병합
+        lastToken = token;
         const mm = String(Math.floor(s.start / 60)).padStart(2, "0");
         const ss = (s.start % 60).toFixed(2).padStart(5, "0");
-        parts.push({ t: s.start, s: `[${mm}:${ss}] ${spellPc(pc, pref)}${q}` });
+        parts.push({ t: s.start, s: `[${mm}:${ss}] ${token}` });
       }
       if (!parts.length) {
         toast("BTC 타임라인에서 유효한 코드를 못 찾았어요");
@@ -558,6 +564,70 @@ export default function KaraokePage() {
       toast("BTC 초안 채움 — 들어보고 고친 뒤 저장하세요");
     } finally {
       setBtcDraftBusy(false);
+    }
+  };
+
+  // ✦ 스탬프 채우기: 편집창의 "빈" 스탬프([mm:ss])만 골라 BTC 타임라인에서 그 시각의 코드를 찾아 붙임.
+  // 워크플로: 사람이 ⏱으로 타이밍을 찍고(가장 정확) → 이 버튼으로 코드 이름만 BTC 데이터에서 채움(초안).
+  // 이미 코드가 붙은 스탬프는 건드리지 않음 — 수동 수정이 파괴되지 않고, 재실행 시 새 빈 스탬프만 채워짐.
+  const [btcStampFillBusy, setBtcStampFillBusy] = useState(false);
+  const btcFillStamps = async () => {
+    if (btcStampFillBusy) return;
+    if (!/\[\d{1,3}:\d{1,2}(?:[.:]\d{1,3})?\]/.test(chordsText)) {
+      toast("스탬프가 없어요 — ⏱ 스탬프로 먼저 찍어주세요");
+      return;
+    }
+    setBtcStampFillBusy(true);
+    try {
+      const res = await fetch(`${BACKEND}/presets/${videoId}/chords_btc`);
+      if (!res.ok) {
+        toast("BTC 분석 결과가 없어요 — 스템이 있는 곡만 오프라인 분석 가능");
+        return;
+      }
+      const data = await res.json();
+      const segs: Array<{ start: number; end: number; chord: string }> = data.segments || [];
+      if (!segs.length) {
+        toast("BTC 타임라인이 비어 있어요");
+        return;
+      }
+      segs.sort((a, b) => a.start - b.start);
+      const pref = prefFromChordText(chordsText) || (keyTonic ? keyAccidentalPref(keyTonic, keyMode) : "sharp");
+      // 이분 탐색: t가 속한 세그먼트 (start <= t < end). N/X 구간은 null → 그 스탬프는 비워둠.
+      const chordAt = (t: number): string | null => {
+        let lo = 0, hi = segs.length - 1, idx = -1;
+        while (lo <= hi) {
+          const mid = (lo + hi) >> 1;
+          if (segs[mid].start <= t) { idx = mid; lo = mid + 1; } else hi = mid - 1;
+        }
+        if (idx < 0) return null;
+        const s = segs[idx];
+        if (t >= s.end) return null;
+        return harteSegToAppChord(s.chord, pref);
+      };
+      let filled = 0, missed = 0;
+      const text = chordsText;
+      const newText = text.replace(
+        /\[(\d{1,3}):(\d{1,2}(?:[.:]\d{1,3})?)\]/g,
+        (full: string, mm: string, ss: string, offset: number) => {
+          // 빈 스탬프 판정: 뒤의 공백을 건너뛰면 다른 스탬프([)이거나 문자열 끝이어야 함
+          const after = text.slice(offset + full.length);
+          if (!/^\s*(\[|$)/.test(after)) return full; // 이미 코드가 붙은 스탬프 — 유지
+          const t = parseInt(mm, 10) * 60 + parseFloat(ss.replace(":", "."));
+          if (!isFinite(t)) return full;
+          const token = chordAt(t);
+          if (!token) { missed++; return full; }
+          filled++;
+          return `${full} ${token}`;
+        }
+      );
+      if (!filled && !missed) {
+        toast("채울 빈 스탬프가 없어요 — 이미 코드가 붙은 스탬프만 있어요");
+        return;
+      }
+      if (filled) setChordsText(newText);
+      toast(filled ? `빈 스탬프 ${filled}개 채움${missed ? ` — 매칭 못한 ${missed}개는 비워둠` : ""}` : `${missed}개 스탬프 시각에 매칭되는 코드가 없어요`);
+    } finally {
+      setBtcStampFillBusy(false);
     }
   };
 
@@ -3167,6 +3237,14 @@ export default function KaraokePage() {
                 title="텍스트 커서 위치에 현재 재생 시간의 타임스탬프 삽입 (빈 스탬프 연타 가능 — 나중에 코드 채우기)"
               >
                 ⏱ 스탬프
+              </button>
+              <button
+                onClick={btcFillStamps}
+                disabled={btcStampFillBusy}
+                className="px-2 py-1 rounded-md border border-indigo-700 text-indigo-200 text-xs hover:bg-indigo-950/30 disabled:opacity-50"
+                title="편집창의 빈 스탬프([mm:ss])에 BTC 전곡 분석 데이터에서 그 시각의 코드를 찾아 붙임 — 이미 코드가 붙은 스탬프는 건드리지 않음. 워크플로: ⏱으로 타이밍 먼저 찍기 → 이 버튼으로 코드 채우기"
+              >
+                {btcStampFillBusy ? "채우는 중…" : "✦ 스탬프 채우기"}
               </button>
               <button
                 onClick={btcDraftFill}
