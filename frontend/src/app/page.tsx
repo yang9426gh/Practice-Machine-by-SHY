@@ -521,50 +521,43 @@ export default function KaraokePage() {
     });
   };
 
-  // ✦ BTC 초안: 사전학습 모델(BTC)의 전곡 코드 타임라인(오프라인 분석 사이드카)으로 편집창을 채움.
-  // 초안이므로 들어보고 고친 뒤 저장하는 용도.
-  const [btcDraftBusy, setBtcDraftBusy] = useState(false);
-  const btcDraftFill = async () => {
-    if (btcDraftBusy) return;
-    setBtcDraftBusy(true);
-    try {
-      const res = await fetch(`${BACKEND}/presets/${videoId}/chords_btc`);
-      if (!res.ok) {
-        toast("BTC 분석 결과가 없어요 — 스템이 있는 곡만 오프라인 분석 가능");
-        return;
-      }
-      const data = await res.json();
-      const segs: Array<{ start: number; end: number; chord: string }> = data.segments || [];
-      if (!segs.length) {
-        toast("BTC 타임라인이 비어 있어요");
-        return;
-      }
-      const pref = prefFromChordText(chordsText) || (keyTonic ? keyAccidentalPref(keyTonic, keyMode) : "sharp");
-      const parts: Array<{ t: number; s: string }> = [];
-      let lastToken = "";
-      for (const s of segs) {
-        const token = harteSegToAppChord(s.chord, pref);
-        if (!token) continue;
-        if (token === lastToken) continue; // 동일 코드 연속 병합
-        lastToken = token;
-        const mm = String(Math.floor(s.start / 60)).padStart(2, "0");
-        const ss = (s.start % 60).toFixed(2).padStart(5, "0");
-        parts.push({ t: s.start, s: `[${mm}:${ss}] ${token}` });
-      }
-      if (!parts.length) {
-        toast("BTC 타임라인에서 유효한 코드를 못 찾았어요");
-        return;
-      }
-      // 4개 코드마다 줄바꿈 (표시 줄 구분 = 줄바꿈)
-      const lines: string[] = [];
-      for (let i = 0; i < parts.length; i += 4) lines.push(parts.slice(i, i + 4).map((p) => p.s).join(""));
-      const draft = lines.join("\n");
-      if (chordsText.trim() && !confirm("현재 코드 내용을 BTC 초안으로 교체할까요?")) return;
-      setChordsText(draft);
-      toast("BTC 초안 채움 — 들어보고 고친 뒤 저장하세요");
-    } finally {
-      setBtcDraftBusy(false);
+  // 스탬프 비우기: 드래그(선택)한 영역이 걸친 줄들에서 코드 정보를 지우고 빈 스탬프만 남김.
+  // 타이밍(스탬프)은 보존 — 비운 뒤 ✦ 스탬프 채우기로 다시 채우거나 수동으로 입력하는 워크플로.
+  const clearStampsInSelection = () => {
+    const el = document.getElementById("chords-edit-area") as HTMLTextAreaElement | null;
+    if (!el) return;
+    const start = el.selectionStart ?? 0;
+    const end = el.selectionEnd ?? 0;
+    if (start === end) {
+      toast("비울 코드를 드래그로 선택해주세요");
+      return;
     }
+    // 선택 영역을 줄 단위로 확장 — 걸친 줄까지 통째로 처리(부분 선택 줄도 의도대로 비워짐)
+    const lineStart = chordsText.lastIndexOf("\n", start - 1) + 1;
+    let lineEnd = chordsText.indexOf("\n", end);
+    if (lineEnd < 0) lineEnd = chordsText.length;
+    const region = chordsText.slice(lineStart, lineEnd);
+    let count = 0;
+    const cleared = region
+      .split("\n")
+      .map((line) => {
+        const stamps = line.match(/\[\d{1,3}:\d{1,2}(?:[.:]\d{1,3})?\]/g);
+        if (!stamps) return line; // 스탬프 없는 줄은 건드리지 않음
+        count += stamps.length;
+        return stamps.join(" "); // 코드/? 등 나머지 정보 제거, 스탬프만 공백으로 이어붙임
+      })
+      .join("\n");
+    if (!count) {
+      toast("선택 영역에 스탬프가 없어요");
+      return;
+    }
+    const newText = chordsText.slice(0, lineStart) + cleared + chordsText.slice(lineEnd);
+    setChordsText(newText);
+    requestAnimationFrame(() => {
+      el.focus();
+      el.setSelectionRange(lineStart, lineStart);
+    });
+    toast(`코드 비움 — 빈 스탬프 ${count}개 (✦ 스탬프 채우기로 다시 채울 수 있어요)`);
   };
 
   // ✦ 스탬프 채우기: 편집창의 "빈" 스탬프([mm:ss])만 골라 BTC 타임라인에서 그 시각의 코드를 찾아 붙임.
@@ -3238,6 +3231,13 @@ export default function KaraokePage() {
               </div>
               <div className="flex-1" />
               <button
+                onClick={newlineInChordsEditor}
+                className="px-2 py-1 rounded-md border border-zinc-700 text-zinc-200 text-xs hover:bg-zinc-800"
+                title="커서 위치에서 줄바꿈 (엔터와 동일)"
+              >
+                ↵ 줄바꿈
+              </button>
+              <button
                 onClick={() => stampChordAtCursor()}
                 className="px-2 py-1 rounded-md border border-emerald-700 text-emerald-200 text-xs hover:bg-emerald-950/30"
                 title="텍스트 커서 위치에 현재 재생 시간의 타임스탬프 삽입 (빈 스탬프 연타 가능 — 나중에 코드 채우기)"
@@ -3253,19 +3253,11 @@ export default function KaraokePage() {
                 {btcStampFillBusy ? "채우는 중…" : "✦ 스탬프 채우기"}
               </button>
               <button
-                onClick={btcDraftFill}
-                disabled={btcDraftBusy}
-                className="px-2 py-1 rounded-md border border-indigo-700 text-indigo-200 text-xs hover:bg-indigo-950/30 disabled:opacity-50"
-                title="사전학습 모델(BTC)의 전곡 분석 결과로 편집창을 통째로 채움 — 초안이므로 들어보고 고친 뒤 저장"
+                onClick={clearStampsInSelection}
+                className="px-2 py-1 rounded-md border border-amber-700 text-amber-200 text-xs hover:bg-amber-950/30"
+                title="드래그(선택)한 영역이 걸친 줄의 코드 정보를 지우고 빈 스탬프만 남김 — 타이밍은 보존되며 ✦ 스탬프 채우기로 다시 채울 수 있음"
               >
-                {btcDraftBusy ? "가져오는 중…" : "✦ BTC 초안"}
-              </button>
-              <button
-                onClick={newlineInChordsEditor}
-                className="px-2 py-1 rounded-md border border-zinc-700 text-zinc-200 text-xs hover:bg-zinc-800"
-                title="커서 위치에서 줄바꿈 (엔터와 동일)"
-              >
-                ↵ 줄바꿈
+                스탬프 비우기
               </button>
             </div>
             <div className="flex gap-2">
