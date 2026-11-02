@@ -21,7 +21,7 @@ export const DEFAULT_SETTINGS: UiSettings = {
   vignetteSides: 0.55,
   chordStampOffsetSec: -0.25,
   lyricStampOffsetSec: -0.25,
-  btcStampFillOffsetSec: 0,
+  btcStampFillOffsetSec: 0.35, // SHY 튜닝값(2026-11-02) — 첫 설치부터 이 값으로 시작
 };
 
 // 숫자 설정값 방어: 문자/null/NaN/범위 밖이 저장돼도 fallback 또는 clamp로 복귀 (소수 2자리 반올림)
