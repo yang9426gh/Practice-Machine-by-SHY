@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import { createPortal } from "react-dom";
+import pkg from "../../package.json";
 
 export function CassetteLogo({ size = 26 }: { size?: number }) {
   return (
@@ -32,12 +33,15 @@ export function BrandHeader({ compact = false }: { compact?: boolean }) {
     <div className="flex items-center justify-center gap-2 select-none pointer-events-none">
       <CassetteLogo size={compact ? 20 : 26} />
       <div className="text-center leading-none">
-        <div
-          className={`font-extrabold tracking-tight bg-gradient-to-r from-amber-200 via-amber-400 to-orange-500 bg-clip-text text-transparent ${
-            compact ? "text-sm" : "text-lg"
-          }`}
-        >
-          Practice Machine
+        <div className="flex items-baseline justify-center gap-1.5">
+          <div
+            className={`font-extrabold tracking-tight bg-gradient-to-r from-amber-200 via-amber-400 to-orange-500 bg-clip-text text-transparent ${
+              compact ? "text-sm" : "text-lg"
+            }`}
+          >
+            Practice Machine
+          </div>
+          <span className={`font-mono text-zinc-600 ${compact ? "text-[8px]" : "text-[10px]"}`}>v{pkg.version}</span>
         </div>
         <div
           className={`font-medium tracking-[0.35em] text-zinc-500 uppercase ${

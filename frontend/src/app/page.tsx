@@ -2293,77 +2293,80 @@ export default function KaraokePage() {
   return (
     <main className="relative flex flex-col h-screen bg-black text-white overflow-hidden">
       <div className="p-4 border-b border-zinc-800 bg-zinc-950">
-        <div className="flex gap-2 items-center relative">
-          {/* 브랜드 헤더 — 상단 중앙 */}
-          <div className="absolute left-1/2 -translate-x-1/2">
-            <BrandHeader />
-          </div>
-          {/* Support 버튼 — 중앙 로고 바로 왼쪽 */}
-          <div className="absolute right-1/2 mr-[172px] top-1/2 -translate-y-1/2">
-            <SupportButton />
-          </div>
-          {/* URL 로드는 라이브러리 메뉴에서 큐로 이동 — 재생 컨트롤만 상단에 */}
+        <div className="grid grid-cols-[1fr_auto_1fr] items-center gap-2">
+          {/* 좌측: 큐 인디케이터 + Library + Support (Support는 중앙 로고 바로 왼쪽에 붙음) */}
+          <div className="flex items-center gap-2 min-w-0 flex-wrap">
+            {/* 큐 인디케이터 — 백그라운드 작업 중일 때만 표시, 하단 프로그레스 바가 전체 진행률을 채움 */}
+            {queueActive.count > 0 ? (
+              <button
+                onClick={async () => {
+                  await unloadAudio();
+                  router.push("/library");
+                }}
+                className="relative flex items-center gap-2 px-3 py-2 rounded-lg border border-blue-800/60 bg-blue-950/30 text-blue-200 text-xs overflow-hidden"
+                title={`전체 진행률 ${queueActive.pct}% — 클릭해서 라이브러리 열기`}
+              >
+                {/* 배경 프로그레스 채움 */}
+                <span
+                  className="absolute inset-y-0 left-0 bg-blue-600/25 transition-all duration-700 ease-out"
+                  style={{ width: `${queueActive.pct}%` }}
+                />
+                <span className="relative flex h-2 w-2 shrink-0">
+                  <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-blue-400 opacity-75"></span>
+                  <span className="relative inline-flex rounded-full h-2 w-2 bg-blue-500"></span>
+                </span>
+                <span className="relative truncate max-w-[220px]">{queueActive.label}</span>
+                <span className="relative tabular-nums text-blue-300/80">{queueActive.pct}%</span>
+              </button>
+            ) : null}
 
-          {/* 큐 인디케이터 — 백그라운드 작업 중일 때만 표시, 하단 프로그레스 바가 전체 진행률을 채움 */}
-          {queueActive.count > 0 ? (
             <button
               onClick={async () => {
                 await unloadAudio();
                 router.push("/library");
               }}
-              className="relative flex items-center gap-2 px-3 py-2 rounded-lg border border-blue-800/60 bg-blue-950/30 text-blue-200 text-xs overflow-hidden"
-              title={`전체 진행률 ${queueActive.pct}% — 클릭해서 라이브러리 열기`}
+              className="px-3 py-2 rounded-lg border border-zinc-700 text-sm"
             >
-              {/* 배경 프로그레스 채움 */}
-              <span
-                className="absolute inset-y-0 left-0 bg-blue-600/25 transition-all duration-700 ease-out"
-                style={{ width: `${queueActive.pct}%` }}
-              />
-              <span className="relative flex h-2 w-2 shrink-0">
-                <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-blue-400 opacity-75"></span>
-                <span className="relative inline-flex rounded-full h-2 w-2 bg-blue-500"></span>
-              </span>
-              <span className="relative truncate max-w-[220px]">{queueActive.label}</span>
-              <span className="relative tabular-nums text-blue-300/80">{queueActive.pct}%</span>
+              Library
             </button>
-          ) : null}
 
-          <button
-            onClick={async () => {
-              await unloadAudio();
-              router.push("/library");
-            }}
-            className="px-3 py-2 rounded-lg border border-zinc-700 text-sm"
-          >
-            Library
-          </button>
+            <div className="ml-auto">
+              <SupportButton />
+            </div>
+          </div>
 
-          <div className="flex-1" />
+          {/* 중앙: 브랜드 헤더 — 그리드 중앙 열이라 좌우 버튼과 절대 겹치지 않음 */}
+          <div className="shrink-0">
+            <BrandHeader />
+          </div>
 
-          <button
-            onClick={exportMp3}
-            disabled={status !== "completed"}
-            className={`px-3 py-2 rounded-lg border text-sm ${status === "completed" ? "border-zinc-700 hover:bg-zinc-900" : "border-zinc-800 text-zinc-600 cursor-not-allowed"}`}
-          >
-            Export MP3
-          </button>
-          <button
-            onClick={exportVideo}
-            disabled={status !== "completed" || !videoUrl || videoExportPct != null}
-            className={`px-3 py-2 rounded-lg border text-sm ${status === "completed" && videoUrl && videoExportPct == null ? "border-zinc-700 hover:bg-zinc-900" : "border-zinc-800 text-zinc-600 cursor-not-allowed"}`}
-            title="영상 + 믹스 오디오 + 코드/가사 자막 번인 mp4"
-          >
-            {videoExportPct != null ? `Encoding ${videoExportPct}%` : "Export Video"}
-          </button>
-          {videoExportPct != null ? (
+          {/* 우측: 내보내기 버튼들 */}
+          <div className="flex items-center gap-2 justify-end min-w-0 flex-wrap">
             <button
-              onClick={cancelVideoExport}
-              className="px-2.5 py-2 rounded-lg border border-red-900/60 text-red-300 hover:bg-red-950/30 text-sm"
-              title="Export Video 취소"
+              onClick={exportMp3}
+              disabled={status !== "completed"}
+              className={`px-3 py-2 rounded-lg border text-sm ${status === "completed" ? "border-zinc-700 hover:bg-zinc-900" : "border-zinc-800 text-zinc-600 cursor-not-allowed"}`}
             >
-              ✕
+              Export MP3
             </button>
-          ) : null}
+            <button
+              onClick={exportVideo}
+              disabled={status !== "completed" || !videoUrl || videoExportPct != null}
+              className={`px-3 py-2 rounded-lg border text-sm ${status === "completed" && videoUrl && videoExportPct == null ? "border-zinc-700 hover:bg-zinc-900" : "border-zinc-800 text-zinc-600 cursor-not-allowed"}`}
+              title="영상 + 믹스 오디오 + 코드/가사 자막 번인 mp4"
+            >
+              {videoExportPct != null ? `Encoding ${videoExportPct}%` : "Export Video"}
+            </button>
+            {videoExportPct != null ? (
+              <button
+                onClick={cancelVideoExport}
+                className="px-2.5 py-2 rounded-lg border border-red-900/60 text-red-300 hover:bg-red-950/30 text-sm"
+                title="Export Video 취소"
+              >
+                ✕
+              </button>
+            ) : null}
+          </div>
         </div>
       </div>
 
