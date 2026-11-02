@@ -6,7 +6,7 @@ import { Play, Pause, ChevronUp, ChevronDown, Maximize, Minimize } from "lucide-
 import { BrandHeader, SupportButton } from "../components/Brand";
 import { busForStem, type BusName } from "../lib/mixRouting";
 import { loadSettings } from "../lib/settings";
-import { detectChordAtTime, prefFromChordText } from "../lib/chordDetect";
+import { detectChordAtTime, prefFromChordText, spellPc, keyAccidentalPref } from "../lib/chordDetect";
 
 const BACKEND = process.env.NEXT_PUBLIC_BACKEND_URL || (typeof window !== "undefined" ? window.location.origin : "http://localhost:8011");
 
@@ -526,6 +526,72 @@ export default function KaraokePage() {
       el.focus();
       el.setSelectionRange(caret, caret);
     });
+  };
+
+  // ✦ BTC 초안: 사전학습 모델(BTC)의 전곡 코드 타임라인(오프라인 분석 사이드카)으로 편집창을 채움.
+  // 초안이므로 들어보고 고친 뒤 저장하는 용도. 되돌리기 버튼이 채우기 이전 내용을 보관.
+  const [btcDraftBusy, setBtcDraftBusy] = useState(false);
+  const [btcUndo, setBtcUndo] = useState<string | null>(null);
+  const btcDraftFill = async () => {
+    if (btcDraftBusy) return;
+    setBtcDraftBusy(true);
+    try {
+      const res = await fetch(`${BACKEND}/presets/${videoId}/chords_btc`);
+      if (!res.ok) {
+        toast("BTC 분석 결과가 없어요 — 스템이 있는 곡만 오프라인 분석 가능");
+        return;
+      }
+      const data = await res.json();
+      const segs: Array<{ start: number; end: number; chord: string }> = data.segments || [];
+      if (!segs.length) {
+        toast("BTC 타임라인이 비어 있어요");
+        return;
+      }
+      const pref = prefFromChordText(chordsText) || (keyTonic ? keyAccidentalPref(keyTonic, keyMode) : "sharp");
+      // Harte 표기 → 앱 코드 토큰 (BTC는 min7/maj7 등 Harte 계열 명칭 사용)
+      const QUAL: Record<string, string | null> = {
+        maj: "", min: "m", dim: "dim", aug: "aug",
+        maj7: "maj7", min7: "m7", 7: "7", sus4: "sus4", sus2: "sus2",
+        hdim7: "m7b5", dim7: "dim",
+        maj6: "", min6: "m", minmaj7: "m", aug7: "aug", 5: "5",
+        9: "", min9: "m", maj9: "", 11: "", min11: "m", 13: "",
+      };
+      const PC_BASE: Record<string, number> = { C: 0, D: 2, E: 4, F: 5, G: 7, A: 9, B: 11 };
+      const parts: string[] = [];
+      let lastKey = "";
+      for (const s of segs) {
+        const ch = (s.chord || "").trim();
+        if (!ch || ch === "N" || ch === "X") continue;
+        const m = ch.match(/^([A-G])([#b]?)(?::(.*))?$/);
+        if (!m) continue;
+        const pc = (PC_BASE[m[1]] + (m[2] === "#" ? 1 : m[2] === "b" ? -1 : 0) + 12) % 12;
+        const qraw = (m[3] || "maj").replace(/\(.*\)/, "");
+        const q = Object.prototype.hasOwnProperty.call(QUAL, qraw) ? QUAL[qraw] : null;
+        if (q === null) continue;
+        const key = `${pc}|${q}`;
+        if (key === lastKey) continue; // 동일 코드 연속 병합
+        lastKey = key;
+        const mm = String(Math.floor(s.start / 60)).padStart(2, "0");
+        const ss = (s.start % 60).toFixed(2).padStart(5, "0");
+        parts.push(`[${mm}:${ss}] ${spellPc(pc, pref)}${q}`);
+      }
+      if (!parts.length) {
+        toast("BTC 타임라인에서 유효한 코드를 못 찾았어요");
+        return;
+      }
+      const draft = parts.join("");
+      if (chordsText.trim() && !confirm("현재 코드 내용을 BTC 초안으로 교체할까요?")) return;
+      setBtcUndo(chordsText);
+      setChordsText(draft);
+      toast("BTC 초안 채움 — 들어보고 고친 뒤 저장하세요");
+    } finally {
+      setBtcDraftBusy(false);
+    }
+  };
+  const btcUndoRestore = () => {
+    if (btcUndo === null) return;
+    setChordsText(btcUndo);
+    setBtcUndo(null);
   };
 
   const videoWrapRef = useRef<HTMLDivElement | null>(null);
@@ -3193,6 +3259,23 @@ export default function KaraokePage() {
               >
                 {chordDetectBusy ? "분석 중…" : "♪ 스탬프+코드"}
               </button>
+              <button
+                onClick={btcDraftFill}
+                disabled={btcDraftBusy}
+                className="px-2 py-1 rounded-md border border-indigo-700 text-indigo-200 text-xs hover:bg-indigo-950/30 disabled:opacity-50"
+                title="사전학습 모델(BTC)의 전곡 분석 결과로 편집창을 통째로 채움 — 초안이므로 들어보고 고친 뒤 저장. 되돌리기 가능"
+              >
+                {btcDraftBusy ? "가져오는 중…" : "✦ BTC 초안"}
+              </button>
+              {btcUndo !== null ? (
+                <button
+                  onClick={btcUndoRestore}
+                  className="px-2 py-1 rounded-md border border-amber-700 text-amber-200 text-xs hover:bg-amber-950/30"
+                  title="BTC 초안 채우기 이전 내용으로 되돌리기"
+                >
+                  ↺ 되돌리기
+                </button>
+              ) : null}
               <span
                 ref={monitorChipRef}
                 className="ml-1 text-xs text-emerald-300/90 tabular-nums whitespace-nowrap"

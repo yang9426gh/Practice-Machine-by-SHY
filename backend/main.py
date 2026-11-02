@@ -949,6 +949,23 @@ async def presets_get_one(preset_id: str):
         raise HTTPException(status_code=500, detail=f"preset lookup failed: {e}")
 
 
+@app.get("/presets/{preset_id}/chords_btc")
+async def presets_chords_btc(preset_id: str):
+    """BTC(사전학습 트랜스포머) 전곡 코드 타임라인 사이드카 — 오프라인 분석 결과가 있을 때만."""
+    import hashlib
+    import json
+
+    tid = hashlib.sha1(preset_id.encode()).hexdigest()[:16]
+    path = os.path.join(DATA_DIR, tid, "chords_btc.json")
+    if not os.path.exists(path):
+        raise HTTPException(status_code=404, detail="no btc timeline for this preset")
+    try:
+        with open(path, encoding="utf-8") as f:
+            return json.load(f)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"btc timeline read failed: {e}")
+
+
 @app.post("/library/import")
 async def library_import(payload: dict = Body(default={})):  # noqa: B008
     """공유 .pmd 항목 병합 — video_id 기준 중복 방지, 빈 필드만 채움(기존 값 미덮음)."""
