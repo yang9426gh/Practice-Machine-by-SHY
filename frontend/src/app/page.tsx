@@ -290,12 +290,11 @@ export default function KaraokePage() {
   // instrumental master slider removed
 
   type MixMode =
-    | { kind: "select" }
     | { kind: "master" }
     | { kind: "vocal" }
     | { kind: "instrument"; instrument: string };
 
-  const [mixMode, setMixMode] = useState<MixMode>({ kind: "select" });
+  const [mixMode, setMixMode] = useState<MixMode>({ kind: "master" });
 
   // Simple mode sliders (used in vocal/instrument modes)
   const [focusVol, setFocusVol] = useState(100);
@@ -1906,8 +1905,6 @@ export default function KaraokePage() {
         });
       } catch {}
 
-      // If user is still on the select screen, default to Master mode after first load.
-      setMixMode((m) => (m.kind === "select" ? { kind: "master" } : m));
       toast("Stems ready — decoding audio…");
 
       // 저장된 가사 있으면 자동 로드 (자동 가져오기는 하지 않음 — 버튼으로)
@@ -2612,59 +2609,6 @@ export default function KaraokePage() {
 
       {/* Controls — 영상을 크게 키우면 남는 공간이 줄어드므로 내부 스크롤 허용 */}
       <div className="p-6 bg-zinc-900/80 border-t border-zinc-800 min-h-0 overflow-y-auto overscroll-contain">
-        {/* Start screen: choose instrument */}
-        {mixMode.kind === "select" ? (
-          <div className="max-w-3xl mx-auto">
-            <div className="text-center text-zinc-200 text-lg font-semibold">Choose your instrument</div>
-            <div className="mt-4 grid grid-cols-2 sm:grid-cols-3 gap-3">
-              <button
-                onClick={() => setMixMode({ kind: "vocal" })}
-                className="rounded-2xl border border-zinc-800 bg-zinc-950/60 px-4 py-4 text-left hover:bg-zinc-900"
-              >
-                <div className="text-2xl">🎤</div>
-                <div className="mt-2 text-sm text-zinc-200">Vocal</div>
-              </button>
-              <button
-                onClick={() => setMixMode({ kind: "instrument", instrument: "drums" })}
-                className="rounded-2xl border border-zinc-800 bg-zinc-950/60 px-4 py-4 text-left hover:bg-zinc-900"
-              >
-                <div className="text-2xl">🥁</div>
-                <div className="mt-2 text-sm text-zinc-200">Drum</div>
-              </button>
-              <button
-                onClick={() => setMixMode({ kind: "instrument", instrument: "bass" })}
-                className="rounded-2xl border border-zinc-800 bg-zinc-950/60 px-4 py-4 text-left hover:bg-zinc-900"
-              >
-                <div className="text-2xl">🎸</div>
-                <div className="mt-2 text-sm text-zinc-200">Bass</div>
-              </button>
-              <button
-                onClick={() => setMixMode({ kind: "instrument", instrument: "guitar" })}
-                className="rounded-2xl border border-zinc-800 bg-zinc-950/60 px-4 py-4 text-left hover:bg-zinc-900"
-              >
-                <div className="text-2xl">🎸</div>
-                <div className="mt-2 text-sm text-zinc-200">Guitar</div>
-              </button>
-              <button
-                onClick={() => setMixMode({ kind: "instrument", instrument: "piano" })}
-                className="rounded-2xl border border-zinc-800 bg-zinc-950/60 px-4 py-4 text-left hover:bg-zinc-900"
-              >
-                <div className="text-2xl">🎹</div>
-                <div className="mt-2 text-sm text-zinc-200">Piano</div>
-              </button>
-              <button
-                onClick={() => setMixMode({ kind: "master" })}
-                className="rounded-2xl border border-blue-800 bg-blue-950/30 px-4 py-4 text-left hover:bg-blue-900/30"
-              >
-                <div className="text-2xl">🎛️</div>
-                <div className="mt-2 text-sm text-zinc-100">Master</div>
-              </button>
-            </div>
-            <div className="mt-4 text-center text-[11px] text-zinc-500">
-              Load a song first (top). Then pick a mode.
-            </div>
-          </div>
-        ) : null}
         <div className="max-w-3xl mx-auto space-y-4">
           <div className="flex items-center justify-center gap-4">
             <button
@@ -2952,21 +2896,35 @@ export default function KaraokePage() {
 
           {/* Instrumental slider removed */}
 
-          <div className="flex items-center justify-between">
-            <div className="text-[11px] text-zinc-500">Stems: {stemOrder.length ? stemOrder.join(", ") : "(none yet)"}</div>
-            <div className="flex gap-2">
-              <button
-                onClick={() => setMixMode({ kind: "select" })}
-                className="text-[11px] px-2 py-1 rounded-md border border-zinc-800 text-zinc-300"
-              >
-                Mode
-              </button>
-              <button
-                onClick={() => setMixMode({ kind: "master" })}
-                className={`text-[11px] px-2 py-1 rounded-md border ${mixMode.kind === "master" ? "border-blue-700 text-blue-200" : "border-zinc-800 text-zinc-300"}`}
-              >
-                Master
-              </button>
+          <div className="flex items-center justify-between gap-2 flex-wrap">
+            <div className="text-[11px] text-zinc-500 hidden sm:block truncate min-w-0">
+              Stems: {stemOrder.length ? stemOrder.join(", ") : "(none yet)"}
+            </div>
+            {/* 모드 선택 — 악기별 직접 선택 (클릭 즉시 해당 모드로 전환) */}
+            <div className="flex flex-wrap gap-1.5 justify-end ml-auto">
+              {([
+                { label: "Vocal", icon: "🎤", mode: { kind: "vocal" } },
+                { label: "Drum", icon: "🥁", mode: { kind: "instrument", instrument: "drums" } },
+                { label: "Bass", icon: "🎸", mode: { kind: "instrument", instrument: "bass" } },
+                { label: "Guitar", icon: "🎸", mode: { kind: "instrument", instrument: "guitar" } },
+                { label: "Piano", icon: "🎹", mode: { kind: "instrument", instrument: "piano" } },
+                { label: "Master", icon: "🎛️", mode: { kind: "master" } },
+              ] as { label: string; icon: string; mode: MixMode }[]).map(({ label, icon, mode }) => {
+                const active =
+                  mode.kind === "instrument"
+                    ? mixMode.kind === "instrument" && mixMode.instrument === mode.instrument
+                    : mixMode.kind === mode.kind;
+                return (
+                  <button
+                    key={label}
+                    onClick={() => setMixMode(mode)}
+                    className={`text-[11px] px-2 py-1 rounded-md border ${active ? "border-blue-700 text-blue-200 bg-blue-950/30" : "border-zinc-800 text-zinc-300 hover:bg-zinc-900"}`}
+                    title={`${label} 모드로 전환`}
+                  >
+                    {icon} {label}
+                  </button>
+                );
+              })}
             </div>
           </div>
 
