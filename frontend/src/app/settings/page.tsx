@@ -62,7 +62,6 @@ export default function SettingsPage() {
         <div className="flex items-center justify-between">
           <div>
             <h1 className="text-2xl font-black">Settings</h1>
-            <p className="text-zinc-400 text-sm">Stamp timing</p>
           </div>
           <div className="flex gap-2">
             <button

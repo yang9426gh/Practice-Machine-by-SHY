@@ -638,7 +638,7 @@ export default function LibraryPage() {
 
           <button
             onClick={exportMode ? cancelExportMode : enterExportMode}
-            className={`px-3 py-2 rounded-lg border text-sm whitespace-nowrap ${exportMode ? "border-blue-700 bg-blue-950/40 text-blue-200" : "border-zinc-700"}`}
+            className={`px-3 py-2 rounded-lg border text-sm whitespace-nowrap min-w-[102px] ${exportMode ? "border-blue-700 bg-blue-950/40 text-blue-200" : "border-zinc-700"}`}
           >
             {exportMode ? "Export 취소" : "Export Data"}
           </button>
