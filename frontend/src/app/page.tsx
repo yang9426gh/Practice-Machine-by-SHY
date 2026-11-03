@@ -5,7 +5,7 @@ import { useRouter } from "next/navigation";
 import { Play, Pause, ChevronUp, ChevronDown, Maximize, Minimize } from "lucide-react";
 import { BrandHeader, SupportButton } from "../components/Brand";
 import { busForStem, type BusName } from "../lib/mixRouting";
-import { loadSettings } from "../lib/settings";
+import { loadSettings, MIX_MODE_VALUES } from "../lib/settings";
 import { prefFromChordText, spellPc, keyAccidentalPref } from "../lib/chordDetect";
 
 const BACKEND = process.env.NEXT_PUBLIC_BACKEND_URL || (typeof window !== "undefined" ? window.location.origin : "http://localhost:8011");
@@ -295,6 +295,15 @@ export default function KaraokePage() {
     | { kind: "instrument"; instrument: string };
 
   const [mixMode, setMixMode] = useState<MixMode>({ kind: "master" });
+
+  // 재생창 진입 시(마운트마다) 설정의 Default Instrument 모드를 항상 먼저 적용
+  useEffect(() => {
+    const v = loadSettings().defaultMixMode;
+    if (!(MIX_MODE_VALUES as readonly string[]).includes(v)) return;
+    setMixMode(
+      v === "vocal" ? { kind: "vocal" } : v === "master" ? { kind: "master" } : { kind: "instrument", instrument: v },
+    );
+  }, []);
 
   // Simple mode sliders (used in vocal/instrument modes)
   const [focusVol, setFocusVol] = useState(100);

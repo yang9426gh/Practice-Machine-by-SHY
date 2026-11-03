@@ -4,10 +4,19 @@ import React from 'react';
 import Link from 'next/link';
 import { ChevronLeft, ChevronRight } from 'lucide-react';
 import { useSettings } from '../../lib/useSettings';
-import { DEFAULT_SETTINGS, clampNum } from '../../lib/settings';
+import { DEFAULT_SETTINGS, MIX_MODE_VALUES, clampNum } from '../../lib/settings';
 
 const STEP = 0.05;
 const LIMIT = 2; // 최대 ±2초
+
+const MIX_MODE_LABELS: Record<string, string> = {
+  master: "🎛️ Master",
+  vocal: "🎤 Vocal",
+  drums: "🥁 Drum",
+  bass: "🎸 Bass",
+  guitar: "🎸 Guitar",
+  piano: "🎹 Piano",
+};
 
 // ← [-0.25s] → 스테퍼: 왼쪽 버튼 -0.05, 오른쪽 버튼 +0.05
 function OffsetStepper({ label, value, onChange }: {
@@ -69,6 +78,27 @@ export default function SettingsPage() {
               Back
             </Link>
           </div>
+        </div>
+
+        <div className="rounded-xl border border-zinc-800 bg-zinc-950/60 p-5 space-y-4">
+          <div>
+            <div className="text-sm font-semibold text-zinc-200">Default Instrument (기본 악기 모드)</div>
+            <p className="text-xs text-zinc-500 mt-1">
+              재생창에 들어올 때 항상 이 악기의 스템 믹서가 먼저 표시됩니다. 라이브러리를 다녀와도 이 모드로 시작합니다.
+            </p>
+          </div>
+          <select
+            value={settings.defaultMixMode}
+            onChange={(e) => patch({ defaultMixMode: e.target.value as typeof settings.defaultMixMode })}
+            className="px-3 py-2 rounded-lg border border-zinc-700 text-sm bg-zinc-950 text-zinc-200"
+            aria-label="Default Instrument"
+          >
+            {MIX_MODE_VALUES.map((v) => (
+              <option key={v} value={v}>
+                {MIX_MODE_LABELS[v]}
+              </option>
+            ))}
+          </select>
         </div>
 
         <div className="rounded-xl border border-zinc-800 bg-zinc-950/60 p-5 space-y-6">

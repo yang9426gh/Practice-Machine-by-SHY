@@ -1,3 +1,7 @@
+// 악기 모드 값 화이트리스트 (Default Instrument 설정 + 재생창 초기 모드 적용 공용)
+export const MIX_MODE_VALUES = ["master", "vocal", "drums", "bass", "guitar", "piano"] as const;
+export type MixModeValue = (typeof MIX_MODE_VALUES)[number];
+
 export type UiSettings = {
   bgOpacity: number;        // 0..1
   bgBlurPx: number;         // px
@@ -9,6 +13,7 @@ export type UiSettings = {
   chordStampOffsetSec: number; // 스탬프 오프셋(초): 음수=그만큼 더 일찍 기록, 양수=더 늦게 기록
   lyricStampOffsetSec: number; // 〃 가사 스탬프
   btcStampFillOffsetSec: number; // 스탬프 채우기 매칭 오프셋(초): 스탬프 시각 + 이 값으로 BTC 타임라인 조회
+  defaultMixMode: MixModeValue; // 재생창 진입 시 항상 먼저 뜨는 스템 믹서 모드
 };
 
 export const DEFAULT_SETTINGS: UiSettings = {
@@ -22,6 +27,7 @@ export const DEFAULT_SETTINGS: UiSettings = {
   chordStampOffsetSec: -0.25,
   lyricStampOffsetSec: -0.25,
   btcStampFillOffsetSec: 0.35, // SHY 튜닝값(2026-11-02) — 첫 설치부터 이 값으로 시작
+  defaultMixMode: "master",
 };
 
 // 숫자 설정값 방어: 문자/null/NaN/범위 밖이 저장돼도 fallback 또는 clamp로 복귀 (소수 2자리 반올림)
@@ -52,6 +58,7 @@ export function loadSettings(): UiSettings {
     merged.chordStampOffsetSec = clampNum(merged.chordStampOffsetSec, -2, 2, DEFAULT_SETTINGS.chordStampOffsetSec);
     merged.lyricStampOffsetSec = clampNum(merged.lyricStampOffsetSec, -2, 2, DEFAULT_SETTINGS.lyricStampOffsetSec);
     merged.btcStampFillOffsetSec = clampNum(merged.btcStampFillOffsetSec, -2, 2, DEFAULT_SETTINGS.btcStampFillOffsetSec);
+    if (!(MIX_MODE_VALUES as readonly string[]).includes(merged.defaultMixMode)) merged.defaultMixMode = "master";
     return merged;
   } catch {
     return DEFAULT_SETTINGS;
