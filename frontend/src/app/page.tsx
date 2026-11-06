@@ -7,6 +7,7 @@ import { BrandHeader, SupportButton } from "../components/Brand";
 import { busForStem, type BusName } from "../lib/mixRouting";
 import { loadSettings, MIX_MODE_VALUES } from "../lib/settings";
 import { prefFromChordText, spellPc, keyAccidentalPref } from "../lib/chordDetect";
+import { applyChordsToSlots, findSlotsInSelection } from "../lib/chordClipboard";
 
 const BACKEND = process.env.NEXT_PUBLIC_BACKEND_URL || (typeof window !== "undefined" ? window.location.origin : "http://localhost:8011");
 
@@ -441,6 +442,9 @@ export default function KaraokePage() {
     editRawRef.current = raw;
     setChordsText(base ? transposeLrcText(raw, base) : raw);
     setChordsMode(mode);
+    // 편집창 세션 시작 — 곡이 바뀌면 undo 히스토리도 무의미하므로 리셋
+    chordsUndoRef.current = [];
+    setChordsUndoDepth(0);
     setChordsOpen(true);
   };
 
@@ -510,6 +514,7 @@ export default function KaraokePage() {
       const insStr = mEmpty[0].replace(/[ \t]+$/, "") + " " + chord + " ";
       const newText = text.slice(0, s0) + insStr + after;
       const caret = s0 + insStr.length;
+      pushChordsUndo(text);
       setChordsText(newText);
       requestAnimationFrame(() => {
         el.focus();
@@ -532,6 +537,7 @@ export default function KaraokePage() {
       newText = before + pad + ins + " " + after;
       caret = start + pad.length + ins.length + 1;
     }
+    pushChordsUndo(text);
     setChordsText(newText);
     requestAnimationFrame(() => {
       el.focus();
@@ -549,6 +555,7 @@ export default function KaraokePage() {
     const after = chordsText.slice(end);
     const newText = `${before}\n${after}`;
     const caret = start + 1;
+    pushChordsUndo(chordsText);
     setChordsText(newText);
     requestAnimationFrame(() => {
       el.focus();
@@ -587,6 +594,7 @@ export default function KaraokePage() {
       return;
     }
     const newText = chordsText.slice(0, lineStart) + cleared + chordsText.slice(lineEnd);
+    pushChordsUndo(chordsText);
     setChordsText(newText);
     requestAnimationFrame(() => {
       el.focus();
@@ -657,6 +665,7 @@ export default function KaraokePage() {
         toast("채울 빈 스탬프가 없어요 — 이미 코드가 붙은 스탬프만 있어요");
         return;
       }
+      pushChordsUndo(text);
       setChordsText(newText);
       toast(filled
         ? `빈 스탬프 ${filled}개 채움${missed ? ` — 매칭 못한 ${missed}개는 - 표시` : ""}`
@@ -664,6 +673,88 @@ export default function KaraokePage() {
     } finally {
       setBtcStampFillBusy(false);
     }
+  };
+
+  // ── 코드 복사 / 붙여넣기 (스탬프 슬롯 단위 — lib/chordClipboard.ts) ──
+  // 복사: 선택 영역에 걸친 슬롯의 코드값만 저장(타임스탬프 미포함). 붙여넣기: 선택 영역 슬롯에 순서대로 덮어씀(타이밍 보존).
+  // 실수 방지 3중장치: ①복사 개수 토스트 ②버퍼 내용 상시 칩 표시 ③개수 불일치 시 confirm 확인 + ↺ 되돌리기
+  const chordClipRef = useRef<string[]>([]);
+  const [chordClip, setChordClip] = useState<string[]>([]);
+  const chordsUndoRef = useRef<string[]>([]);
+  const [chordsUndoDepth, setChordsUndoDepth] = useState(0);
+  const pushChordsUndo = (snapshot: string) => {
+    chordsUndoRef.current.push(snapshot);
+    if (chordsUndoRef.current.length > 30) chordsUndoRef.current.shift();
+    setChordsUndoDepth(chordsUndoRef.current.length);
+  };
+  const chordsEditorSel = () => {
+    const el = document.getElementById("chords-edit-area") as HTMLTextAreaElement | null;
+    if (!el) return null;
+    return { el, start: el.selectionStart ?? 0, end: el.selectionEnd ?? 0 };
+  };
+  const copyChordsFromSelection = () => {
+    const sel = chordsEditorSel();
+    if (!sel) return;
+    if (sel.start === sel.end) {
+      toast("복사할 코드를 드래그로 선택해주세요");
+      return;
+    }
+    const slots = findSlotsInSelection(chordsText, sel.start, sel.end);
+    if (!slots.length) {
+      toast("드래그한 영역에 타임스탬프가 없어요 — [mm:ss] 스탬프가 포함되게 드래그해주세요");
+      return;
+    }
+    const chords = slots.map((s) => s.chord);
+    chordClipRef.current = chords;
+    setChordClip(chords);
+    toast(`코드 ${chords.length}개 복사됨: ${chords.slice(0, 8).join(" ")}${chords.length > 8 ? " …" : ""}`);
+  };
+  const pasteChordsIntoSelection = () => {
+    const sel = chordsEditorSel();
+    if (!sel) return;
+    const clip = chordClipRef.current;
+    if (!clip.length) {
+      toast("복사한 코드가 없어요 — 먼저 복사할 영역을 드래그하고 코드 복사를 눌러주세요");
+      return;
+    }
+    if (sel.start === sel.end) {
+      toast("붙여넣을 영역을 드래그로 선택해주세요");
+      return;
+    }
+    const slots = findSlotsInSelection(chordsText, sel.start, sel.end);
+    if (!slots.length) {
+      toast("드래그한 영역에 타임스탬프가 없어요 — [mm:ss] 스탬프가 포함되게 드래그해주세요");
+      return;
+    }
+    const m = slots.length;
+    const n = clip.length;
+    if (m !== n) {
+      // 길이 불일치 = 선택 실수 가능성 — 개수를 보여주고 확인받고 진행 (기본 정책: 앞에서부터 min개만 채움, 대상 잉여는 기존 유지)
+      const ok = window.confirm(
+        m > n
+          ? `선택 영역의 스탬프가 ${m}개인데 복사한 코드는 ${n}개예요.\n앞의 ${n}개만 채우고 나머지 ${m - n}개는 기존 코드를 유지할까요?`
+          : `복사한 코드가 ${n}개인데 선택 영역의 스탬프는 ${m}개예요.\n앞의 ${m}개만 채우고 복사본 나머지 ${n - m}개는 버려질까요?`,
+      );
+      if (!ok) return;
+    }
+    pushChordsUndo(chordsText);
+    const { newText, applied, kept } = applyChordsToSlots(chordsText, slots, clip);
+    setChordsText(newText);
+    requestAnimationFrame(() => {
+      sel.el.focus();
+      sel.el.setSelectionRange(slots[0].slotStart, slots[0].slotStart);
+    });
+    toast(`코드 ${applied}개 붙여넣음${kept ? ` — 기존 유지 ${kept}개` : ""}`);
+  };
+  const undoChordsEdit = () => {
+    const prev = chordsUndoRef.current.pop();
+    if (!prev) {
+      toast("되돌릴 항목이 없어요");
+      return;
+    }
+    setChordsText(prev);
+    setChordsUndoDepth(chordsUndoRef.current.length);
+    toast("되돌림");
   };
 
   const videoWrapRef = useRef<HTMLDivElement | null>(null);
@@ -3237,7 +3328,7 @@ export default function KaraokePage() {
               onClick={handleChordsEditClick}
             />
             {/* Transport: 재생 컨트롤 + 커서 위치 코드 스탬프 */}
-            <div className="flex items-center gap-2 rounded-lg border border-zinc-800 bg-zinc-900/60 px-2 py-1.5">
+            <div className="flex flex-wrap items-center gap-2 rounded-lg border border-zinc-800 bg-zinc-900/60 px-2 py-1.5">
               <button
                 onClick={togglePlay}
                 className="px-2.5 py-1 rounded-md border border-zinc-700 text-xs hover:bg-zinc-800"
@@ -3282,7 +3373,37 @@ export default function KaraokePage() {
               >
                 스탬프 비우기
               </button>
+              <button
+                onClick={copyChordsFromSelection}
+                className="px-2 py-1 rounded-md border border-sky-700 text-sky-200 text-xs hover:bg-sky-950/30"
+                title="드래그(선택)한 영역의 코드값만 복사 — 타임스탬프는 복사되지 않음. 붙여넣을 때 선택 영역의 스탬프 순서대로 코드가 덮어써짐"
+              >
+                📋 코드 복사
+              </button>
+              <button
+                onClick={pasteChordsIntoSelection}
+                className="px-2 py-1 rounded-md border border-sky-700 text-sky-200 text-xs hover:bg-sky-950/30"
+                title="드래그(선택)한 영역의 코드를 복사해둔 코드로 순서대로 교체 — 타임스탬프(타이밍)는 그대로 유지. 개수가 다르면 확인 후 앞에서부터 채우고 나머지는 기존 유지"
+              >
+                📥 코드 붙여넣기
+              </button>
+              <button
+                onClick={undoChordsEdit}
+                disabled={chordsUndoDepth === 0}
+                className="px-2 py-1 rounded-md border border-zinc-700 text-zinc-300 text-xs hover:bg-zinc-800 disabled:opacity-40"
+                title="편집창에서 버튼으로 수행한 변경(붙여넣기/스탬프/채우기/비우기 등)을 한 단계씩 되돌림 — 수동 타이핑 되돌리기는 Ctrl+Z"
+              >
+                ↺ 되돌리기
+              </button>
             </div>
+            {chordClip.length ? (
+              <div
+                className="text-[11px] text-zinc-400 font-mono truncate"
+                title="복사해둔 코드 — 붙여넣을 영역을 드래그하고 코드 붙여넣기를 누르면 이 순서대로 덮어써짐"
+              >
+                📋 {chordClip.length}개: {chordClip.slice(0, 12).join(" ")}{chordClip.length > 12 ? " …" : ""}
+              </div>
+            ) : null}
             <div className="flex gap-2">
               <button
                 onClick={chordsSave}
