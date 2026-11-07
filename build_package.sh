@@ -14,7 +14,7 @@
 set -euo pipefail
 cd "$(dirname "${BASH_SOURCE[0]}")"
 ROOT="$(pwd)"
-VERSION="1.6.0"
+VERSION="1.6.1"
 STAGE="$(mktemp -d)"
 DMG_DIR="$STAGE/dmg"
 APPDIR="$DMG_DIR/Practice Machine by SHY"   # 배포 폴더 = 프로젝트 루트 (앱들이 그 안에 위치)
@@ -83,6 +83,8 @@ cat > "$APPDIR/! 먼저 읽으세요.txt" <<'EOF'
 
 1. 이 폴더("Practice Machine by SHY") 전체를 원하는 위치로 옮기세요.
    (응용프로그램·문서·바탕화면 아무 곳이나 OK — 폴더 안의 앱들이 서로를 자동으로 찾습니다)
+   · DMG 창 안에서 바로 실행해도 이제 괜찮습니다 — 앱이 감지해서 바탕화면으로
+     복사한 뒤 자동으로 계속합니다 (v1.6.1).
 
 2. 폴더 안에서 "Practice Machine by SHY" 앱을 더블클릭하세요.
    · 첫 실행: 필요한 구성요소를 자동 내려받아 설치합니다 (인터넷 필요, 몇 분 소요).

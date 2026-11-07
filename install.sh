@@ -15,6 +15,26 @@ set -euo pipefail
 cd "$(dirname "${BASH_SOURCE[0]}")"
 ROOT="$(pwd)"
 
+# ---------- 0) 읽기전용 위치(DMG 등)에서 실행되면 바탕화면으로 복사 후 재실행 ----------
+# v1.6.1: DMG를 마운트한 채 그 안에서 실행하면 venv/런타임/로그 생성이 전부
+#         "Read-only file system"으로 실패함(실측: /Volumes 경로 직접 실행). 자동 복구.
+if [ ! -w "$ROOT" ]; then
+  osascript -e 'display dialog "DMG에서 바로 실행했습니다.\n바탕화면으로 복사한 뒤 자동으로 계속합니다." with title "Practice Machine by SHY" buttons {"OK"} default button 1 with icon note giving up after 15' >/dev/null 2>&1 || true
+  DEST="$HOME/Desktop/Practice Machine by SHY"
+  if [ -e "$DEST" ]; then
+    osascript -e 'display dialog "바탕화면에 이미 폴더가 있습니다.\n그 폴더 안의 Practice Machine by SHY 앱을 실행해 주세요." with title "Practice Machine by SHY" buttons {"OK"} default button 1 with icon note giving up after 15' >/dev/null 2>&1 || true
+    open -R "$DEST"
+    exit 0
+  fi
+  ditto "$ROOT" "$DEST" || { echo "❌ 바탕화면 복사 실패 — DMG의 폴더를 직접 드래그해서 옮긴 뒤 실행해 주세요."; exit 1; }
+  xattr -dr com.apple.quarantine "$DEST" 2>/dev/null || true
+  echo "✔ 바탕화면으로 복사 완료 — 설치를 계속합니다"
+  if [ "${HOLY_RELOCATE_TEST:-}" = "1" ]; then echo "[test] relocate ok: $DEST"; ls "$DEST" | head -6; exit 0; fi
+  APP="$DEST/Practice Machine by SHY.app"
+  if [ -d "$APP" ]; then open "$APP"; else exec bash "$DEST/install.sh"; fi
+  exit 0
+fi
+
 echo "🎤 Practice Machine by SHY 설치"
 
 # Finder에서 연 터미널은 PATH가 좁을 수 있음 — Homebrew 보장
