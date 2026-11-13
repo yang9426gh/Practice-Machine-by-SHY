@@ -171,8 +171,8 @@ if [ -f settings.env ]; then
   [ -n "$SAVED_HOST" ] && export HOLY_HOST="$SAVED_HOST"
 fi
 export HOLY_HOST="${HOLY_HOST:-127.0.0.1}"
-# 자가 업데이트 manifest (파일 ID 고정 — 재배포에도 링크 불변)
-export HOLY_UPDATE_MANIFEST_URL="https://drive.usercontent.google.com/download?id=1T8FN6awjqp9oFOxwzkpI-EYuWqWEparR&export=download&confirm=t"
+# 자가 업데이트 manifest (GitHub Releases 최신 — 게시는 git push/gh release 만으로)
+export HOLY_UPDATE_MANIFEST_URL="https://github.com/yang9426gh/Practice-Machine-by-SHY/releases/latest/download/manifest.json"
 nohup "$ROOT/backend/venv/bin/python" -m uvicorn main:app --host "$HOLY_HOST" --port "$PORT" \
   >"$ROOT/backend/run.log" 2>&1 &
 echo $! > "$ROOT/backend/run.pid"
