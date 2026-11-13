@@ -23,6 +23,7 @@ rsync -a \
   --exclude '.DS_Store' --exclude 'assets' --exclude 'make_icon.py' \
   --exclude 'build_package.sh' --exclude 'build_package_windows.sh' \
   --exclude '*.sh' --exclude '*.app' \
+  --exclude 'tools' \
   --exclude 'launcher.log' --exclude 'toggle.log' \
   "$ROOT/" "$STAGE/$APPNAME/"
 

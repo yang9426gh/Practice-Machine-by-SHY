@@ -68,6 +68,7 @@ rsync -a \
   --exclude 'frontend/node_modules' --exclude 'frontend/.next' \
   --exclude '.git' --exclude 'runtime' --exclude 'dist' --exclude 'launcher.log' --exclude 'toggle.log' \
   --exclude 'windows_*' --exclude '*.bat' --exclude 'README-WINDOWS.txt' \
+  --exclude 'tools' \
   --exclude '.DS_Store' --exclude 'assets' --exclude 'make_icon.py' --exclude 'build_package.sh' \
   "$ROOT/" "$APPDIR/"
 
