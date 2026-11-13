@@ -22,11 +22,27 @@ if [ ! -w "$ROOT" ]; then
   osascript -e 'display dialog "DMG에서 바로 실행했습니다.\n바탕화면으로 복사한 뒤 자동으로 계속합니다." with title "Practice Machine by SHY" buttons {"OK"} default button 1 with icon note giving up after 15' >/dev/null 2>&1 || true
   DEST="$HOME/Desktop/Practice Machine by SHY"
   if [ -e "$DEST" ]; then
-    osascript -e 'display dialog "바탕화면에 이미 폴더가 있습니다.\n그 폴더 안의 Practice Machine by SHY 앱을 실행해 주세요." with title "Practice Machine by SHY" buttons {"OK"} default button 1 with icon note giving up after 15' >/dev/null 2>&1 || true
-    open -R "$DEST"
+    # v1.7.0: 기존 설치 발견 → 업데이트 모드 (곡 데이터·설정 보존, 코드만 교체)
+    BAK="$DEST (이전백업 $(date +%Y%m%d-%H%M))"
+    mv "$DEST" "$BAK" || { osascript -e 'display dialog "기존 폴더를 옮기지 못했습니다. 앱·서버를 종료한 뒤 다시 실행해주세요." with title "Practice Machine by SHY" buttons {"OK"} default button 1 with icon note giving up after 15' >/dev/null 2>&1 || true; open -R "$DEST"; exit 0; }
+    if ! ditto "$ROOT" "$DEST"; then mv "$BAK" "$DEST"; echo "❌ 복사 실패 — 원래 폴더를 그대로 되돌렸습니다."; exit 1; fi
+    chmod -R u+w "$DEST" 2>/dev/null || true
+    xattr -dr com.apple.quarantine "$DEST" 2>/dev/null || true
+    [ -f "$BAK/backend/run.pid" ] && kill "$(cat "$BAK/backend/run.pid")" 2>/dev/null || true
+    command -v lsof >/dev/null 2>&1 && lsof -ti tcp:8011 2>/dev/null | xargs kill 2>/dev/null || true
+    for i in 1 2 3 4 5 6; do curl -s -o /dev/null --max-time 1 "http://127.0.0.1:8011/" || break; sleep 0.5; done
+    for item in backend/data backend/venv backend/runtime backend/settings.env backend/run.log backend/run.err backend/run.pid launcher.log toggle.log; do
+      if [ -e "$BAK/$item" ] && [ ! -e "$DEST/$item" ]; then mv "$BAK/$item" "$DEST/$item" 2>/dev/null || true; fi
+    done
+    rm -rf "$BAK"
+    echo "✔ 업데이트 완료 — 곡 데이터를 그대로 옮겼습니다"
+    if [ "${HOLY_MIGRATE_TEST:-}" = "1" ]; then echo "[test] migrate ok: $DEST"; echo "[test] data: $(ls "$DEST/backend/data" 2>/dev/null | head -3 | tr '\n' ' ')"; exit 0; fi
+    APP="$DEST/Practice Machine by SHY.app"
+    if [ -d "$APP" ]; then open "$APP"; else exec bash "$DEST/install.sh"; fi
     exit 0
   fi
   ditto "$ROOT" "$DEST" || { echo "❌ 바탕화면 복사 실패 — DMG의 폴더를 직접 드래그해서 옮긴 뒤 실행해 주세요."; exit 1; }
+  chmod -R u+w "$DEST" 2>/dev/null || true
   xattr -dr com.apple.quarantine "$DEST" 2>/dev/null || true
   echo "✔ 바탕화면으로 복사 완료 — 설치를 계속합니다"
   if [ "${HOLY_RELOCATE_TEST:-}" = "1" ]; then echo "[test] relocate ok: $DEST"; ls "$DEST" | head -6; exit 0; fi

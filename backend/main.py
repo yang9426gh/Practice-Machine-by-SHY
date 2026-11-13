@@ -1847,6 +1847,59 @@ async def lyrics_yaml(video_id: str):
 
 
 # -----------------------------
+# Self-update (앱 내 원클릭 업데이트 — 곡 데이터·venv 보존, v1.7.0)
+# -----------------------------
+try:
+    import updater as _updater
+except ImportError:  # 개발 환경에서 모듈 누락 시에도 서버 전체는 살아있어야 한다
+    _updater = None
+
+
+@app.get("/update/status")
+def update_status():
+    if _updater is None:
+        raise HTTPException(status_code=501, detail="updater module missing")
+    marker = None
+    if os.path.exists(_updater.MARKER_PATH):
+        try:
+            import json as _json
+            with open(_updater.MARKER_PATH, "r", encoding="utf-8") as f:
+                marker = _json.load(f)
+        except Exception:
+            marker = None
+    return {
+        "version": _updater.current_version(),
+        "configured": "MANIFEST_FID_PLACEHOLDER" not in _updater.MANIFEST_URL,
+        "last_update": marker,
+    }
+
+
+@app.get("/update/check")
+def update_check():
+    if _updater is None:
+        raise HTTPException(status_code=501, detail="updater module missing")
+    if "MANIFEST_FID_PLACEHOLDER" in _updater.MANIFEST_URL:
+        raise HTTPException(status_code=501, detail="업데이트 서버 미설정 (manifest URL 없음)")
+    try:
+        return _updater.check_update()
+    except Exception as e:
+        raise HTTPException(status_code=502, detail=f"업데이트 확인 실패: {e}")
+
+
+@app.post("/update/apply")
+def update_apply():
+    if _updater is None:
+        raise HTTPException(status_code=501, detail="updater module missing")
+    try:
+        result = _updater.apply_update()
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"업데이트 적용 실패: {e}")
+    _updater.schedule_restart(2.0)  # 응답이 클라이언트에 도달한 뒤 재시작
+    result["restarting"] = True
+    return result
+
+
+# -----------------------------
 # Static frontend serving (Next.js out/ — 단일 프로세스 배포)
 # -----------------------------
 FRONTEND_DIST = os.environ.get(

@@ -14,7 +14,7 @@
 set -euo pipefail
 cd "$(dirname "${BASH_SOURCE[0]}")"
 ROOT="$(pwd)"
-VERSION="1.6.1"
+VERSION="1.7.0"
 STAGE="$(mktemp -d)"
 DMG_DIR="$STAGE/dmg"
 APPDIR="$DMG_DIR/Practice Machine by SHY"   # 배포 폴더 = 프로젝트 루트 (앱들이 그 안에 위치)
