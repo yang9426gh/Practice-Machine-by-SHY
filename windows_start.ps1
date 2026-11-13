@@ -28,6 +28,8 @@ foreach ($c in $conns) { Stop-Process -Id $c.OwningProcess -Force -ErrorAction S
 if ($conns) { Start-Sleep -Seconds 1 }
 
 Write-Host "🎤 Practice Machine by SHY 시작 → http://localhost:$Port (바인딩: $HostBind)"
+# 자가 업데이트 manifest (파일 ID 고정 — 재배포에도 링크 불변)
+$env:HOLY_UPDATE_MANIFEST_URL = "https://drive.usercontent.google.com/download?id=1T8FN6awjqp9oFOxwzkpI-EYuWqWEparR&export=download&confirm=t"
 $proc = Start-Process -FilePath $VenvPy `
     -ArgumentList @("-m", "uvicorn", "main:app", "--host", $HostBind, "--port", "$Port") `
     -WorkingDirectory $Backend -WindowStyle Minimized `

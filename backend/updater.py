@@ -23,7 +23,7 @@ ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))  # backend/..
 
 MANIFEST_URL = os.environ.get(
     "HOLY_UPDATE_MANIFEST_URL",
-    "https://drive.usercontent.google.com/download?id=MANIFEST_FID_PLACEHOLDER&export=download&confirm=t",
+    "https://drive.usercontent.google.com/download?id=1T8FN6awjqp9oFOxwzkpI-EYuWqWEparR&export=download&confirm=t",
 )
 
 LAUNCHD_LABEL = "com.holy.karaoke"
