@@ -52,7 +52,7 @@ def queue_add(video_id: str, url: str, name: Optional[str] = None,
                 _QUEUE.remove(x)
         if any(x["video_id"] == video_id for x in _QUEUE):
             raise ValueError("already_queued")
-        active = sum(1 for x in _QUEUE if x["status"] != "completed")
+        active = sum(1 for x in _QUEUE if x["status"] not in ("completed", "error"))
         if active >= MAX_QUEUE:
             raise ValueError("queue_full")
         item = {
@@ -81,11 +81,11 @@ def queue_add(video_id: str, url: str, name: Optional[str] = None,
 
 
 def queue_remove(video_id: str) -> bool:
-    """대기 중 항목만 제거 가능 (실행 중은 cancel API 사용)."""
+    """대기/완료/오류 항목 제거 가능 (실행 중은 cancel API 사용)."""
     with _QLOCK:
         for x in list(_QUEUE):
             if x["video_id"] == video_id:
-                if x["status"] == "queued":
+                if x["status"] in ("queued", "completed", "error"):
                     _QUEUE.remove(x)
                     return True
                 return False
@@ -93,9 +93,10 @@ def queue_remove(video_id: str) -> bool:
 
 
 def queue_clear_completed() -> int:
+    """완료+오류 항목 제거 — 오류가 남아 큐가 영구 full 되는 것 방지."""
     with _QLOCK:
         before = len(_QUEUE)
-        _QUEUE[:] = [x for x in _QUEUE if x["status"] != "completed"]
+        _QUEUE[:] = [x for x in _QUEUE if x["status"] not in ("completed", "error")]
         return before - len(_QUEUE)
 
 
@@ -162,10 +163,31 @@ def _worker_loop():
             queue_update(vid, status="completed", stage="completed", progress=100, task_id=task_id)
         except Exception as e:  # noqa: BLE001
             msg = str(e)
+            try:
+                from main import CANCELLED, RUNNING_LOCK, set_task, task_id_for_url
+            except Exception:
+                CANCELLED = RUNNING_LOCK = set_task = task_id_for_url = None
+            tid = None
+            if task_id_for_url is not None:
+                try:
+                    tid = task_id_for_url(item["url"])
+                except Exception:
+                    tid = None
             if "cancelled" in msg.lower():
                 queue_update(vid, status="error", error="cancelled")
+                # 취소 플래그 소비 — 같은 곡 재추가 1회차가 즉시 실패하는 것 방지
+                if CANCELLED is not None and RUNNING_LOCK is not None and tid:
+                    with RUNNING_LOCK:
+                        CANCELLED.discard(tid)
             else:
                 queue_update(vid, status="error", error=msg[:300])
+            # TASKS에도 오류 기록 — /status/{tid}가 영원히 processing으로 남는 것 방지
+            if set_task is not None and tid:
+                try:
+                    set_task(tid, status="error", stage="error",
+                             error=("cancelled" if "cancelled" in msg.lower() else msg.splitlines()[0] if msg else "error"))
+                except Exception:
+                    pass
 
 def _on_progress(video_id: str, stage: str, progress: int) -> None:
     # 파이프라인 stage → 큐 status 매핑

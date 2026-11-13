@@ -170,6 +170,17 @@ def ensure_transposed_stems(
                 t0 = submit_times.pop(id(f), None)
                 if t0 is not None:
                     completed_durations.append(time.time() - t0)
+                try:
+                    f.result()  # 실패 전파 — 무시하면 부분 파일이 캐시로 확정됨
+                except Exception:
+                    # 실패 시 부분 출력 전부 삭제 (남기면 다음 호출이 캐시로 믿음)
+                    for (_nm, _src, _dst) in work:
+                        try:
+                            if os.path.exists(_dst):
+                                os.remove(_dst)
+                        except OSError:
+                            pass
+                    raise
                 done += 1
                 if progress_cb:
                     try:

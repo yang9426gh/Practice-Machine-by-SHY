@@ -175,12 +175,23 @@ export default function LibraryPage() {
   };
 
   const removeFromQueue = async (vid: string) => {
-    await fetch(`${BACKEND}/queue/${vid}`, { method: "DELETE" });
+    try {
+      const r = await fetch(`${BACKEND}/queue/${vid}`, { method: "DELETE" });
+      if (!r.ok) { toast("제거 실패 — 실행 중 항목은 취소를 사용하세요"); return; }
+    } catch {
+      toast("제거 실패 — 서버 확인");
+      return;
+    }
     await refreshQueue();
   };
 
   const clearCompleted = async () => {
-    await fetch(`${BACKEND}/queue/clear-completed`, { method: "POST" });
+    try {
+      await fetch(`${BACKEND}/queue/clear-completed`, { method: "POST" });
+    } catch {
+      toast("정리 실패 — 서버 확인");
+      return;
+    }
     await refreshQueue();
   };
 
@@ -222,29 +233,41 @@ export default function LibraryPage() {
   const renamePreset = async (p: Preset) => {
     const nn = prompt("Rename", p.name || p.title || p.video_id);
     if (!nn) return;
-    await fetch(`${BACKEND}/presets`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        id: p.id,
-        name: nn,
-        source_url: p.source_url,
-        video_id: p.video_id,
-        title: p.title || null,
-        thumbnail_url: p.thumbnail_url || null,
-        bpm: p.bpm ?? null,
-        semitones: p.semitones ?? 0,
-        master_volume: p.master_volume ?? 1.0,
-        vocal_volume: p.vocal_volume ?? 1.0,
-      }),
-    });
+    try {
+      const r = await fetch(`${BACKEND}/presets`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          id: p.id,
+          name: nn,
+          source_url: p.source_url,
+          video_id: p.video_id,
+          title: p.title || null,
+          thumbnail_url: p.thumbnail_url || null,
+          bpm: p.bpm ?? null,
+          semitones: p.semitones ?? 0,
+          master_volume: p.master_volume ?? 1.0,
+          vocal_volume: p.vocal_volume ?? 1.0,
+        }),
+      });
+      if (!r.ok) { toast("이름 변경 실패 — 서버 확인"); return; }
+    } catch {
+      toast("이름 변경 실패 — 서버 확인");
+      return;
+    }
     await refresh();
   };
 
   const deletePreset = async (p: Preset) => {
     const ok = confirm(`Delete from Library?\n\n${p.name || p.title || p.video_id}`);
     if (!ok) return;
-    await fetch(`${BACKEND}/presets/${encodeURIComponent(p.id)}`, { method: "DELETE" });
+    try {
+      const r = await fetch(`${BACKEND}/presets/${encodeURIComponent(p.id)}`, { method: "DELETE" });
+      if (!r.ok) { toast("삭제 실패 — 서버 확인"); return; }
+    } catch {
+      toast("삭제 실패 — 서버 확인");
+      return;
+    }
     await refresh();
   };
 
@@ -255,7 +278,11 @@ export default function LibraryPage() {
 
   const closeViewer = () => setViewer(null);
 
+  // 연속 클릭 경합 방지 — 이전 요청의 늦은 응답이 지금 열린 뷰어를 덮쓰지 않게 함
+  const viewerReqRef = useRef(0);
+
   const openContentViewer = async (p: Preset, kind: "lyrics" | "chords") => {
+    const reqId = ++viewerReqRef.current;
     setViewer({ preset: p, kind });
     setViewerText("");
     setViewerLoading(true);
@@ -265,16 +292,19 @@ export default function LibraryPage() {
         return;
       }
       const r = await fetch(`${BACKEND}/${kind}/${encodeURIComponent(p.video_id)}`);
+      if (viewerReqRef.current !== reqId) return; // 도중에 다른 요청이 시작됨
       if (r.ok) {
         const j = await r.json();
+        if (viewerReqRef.current !== reqId) return;
         setViewerText(j.lrc || "(저장된 내용이 없습니다)");
       } else {
         setViewerText("(저장된 내용이 없습니다)");
       }
     } catch {
+      if (viewerReqRef.current !== reqId) return;
       setViewerText("(불러오기 실패 — 서버 확인)");
     } finally {
-      setViewerLoading(false);
+      if (viewerReqRef.current === reqId) setViewerLoading(false);
     }
   };
 

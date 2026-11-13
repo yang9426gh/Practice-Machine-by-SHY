@@ -63,6 +63,7 @@ exec > >(tee -a "$LOG") 2>&1
 echo "=== $(date '+%F %T') launcher start ==="
 
 TMP_TGZ="$(mktemp -t pmdownload).tar.gz"
+trap 'rm -f "$TMP_TGZ"' EXIT
 
 # ---------- 1) 이미 실행 중이면 브라우저만 열고 끝 ----------
 if curl -s -o /dev/null --max-time 2 "http://127.0.0.1:$PORT/"; then
@@ -115,9 +116,16 @@ if [ -z "$NODE" ]; then
   NURL="https://nodejs.org/dist/${NODE_VER}/node-${NODE_VER}-darwin-${NARC}.tar.gz"
   mkdir -p "$ROOT/runtime"
   if curl -sL "$NURL" -o "$TMP_TGZ" && tar -xzf "$TMP_TGZ" -C "$ROOT/runtime" 2>/dev/null; then
-    mv "$ROOT/runtime/node-${NODE_VER}-darwin-${NARC}" "$ROOT/runtime/node" 2>/dev/null
-    NODE="$ROOT/runtime/node/bin/node"
-    say "node 준비 완료"
+    rm -rf "$ROOT/runtime/node" 2>/dev/null
+    if mv "$ROOT/runtime/node-${NODE_VER}-darwin-${NARC}" "$ROOT/runtime/node" 2>/dev/null && [ -x "$ROOT/runtime/node/bin/node" ]; then
+      NODE="$ROOT/runtime/node/bin/node"
+      say "node 준비 완료"
+    else
+      NODE=""
+    fi
+    if [ -z "$NODE" ]; then
+      echo "경고: node 설치 실패 — 일부 YouTube 영상이 다운로드되지 않을 수 있음"
+    fi
   else
     # node는 필수는 아님 — 일부 영상(JS challenge)만 실패. 경고 후 계속.
     echo "경고: node 다운로드 실패 — 일부 YouTube 영상이 다운로드되지 않을 수 있음"

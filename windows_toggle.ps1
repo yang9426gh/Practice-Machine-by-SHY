@@ -12,7 +12,14 @@ if (Test-Path $settings) {
     }
 }
 if ($cur -eq "0.0.0.0") { $new = "127.0.0.1" } else { $new = "0.0.0.0" }
-Set-Content -Path $settings -Value "HOLY_HOST=$new" -Encoding ASCII
+# 기존 설정(HOLY_PORT 등) 유지 — HOLY_HOST 줄만 교체/추가
+$lines = @(Get-Content $settings -ErrorAction SilentlyContinue)
+$found = $false
+for ($i = 0; $i -lt $lines.Count; $i++) {
+    if ($lines[$i] -match "^\s*HOLY_HOST\s*=") { $lines[$i] = "HOLY_HOST=$new"; $found = $true; break }
+}
+if (-not $found) { $lines += "HOLY_HOST=$new" }
+Set-Content -Path $settings -Value $lines -Encoding ASCII
 Write-Host "바인딩 변경: $cur → $new (서버 재시작 중...)"
 
 # 재시작 (stop → start)

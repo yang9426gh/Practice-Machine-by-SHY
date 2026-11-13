@@ -81,22 +81,31 @@ for cand in "${PYTHON_BIN_OVERRIDE:-}" "$ROOT/runtime/python/bin/python3" python
   fi
 done
 
-if [ -z "$PYTHON_BIN" ]; then
+install_python_tarball() {
+  # 공식 standalone 런타임 — 이 폴더 안에만 설치(비밀번호 불필요)
   ARC="aarch64"; [ "$(uname -m)" = "x86_64" ] && ARC="x86_64"
+  URL="https://github.com/astral-sh/python-build-standalone/releases/download/20241016/cpython-3.11.10%2B20241016-${ARC}-apple-darwin-install_only.tar.gz"
+  mkdir -p "$ROOT/runtime"
+  curl -fL "$URL" -o "$TMP_TGZ"
+  tar -xzf "$TMP_TGZ" -C "$ROOT/runtime"
+  PYTHON_BIN="$ROOT/runtime/python/bin/python3"
+}
+
+if [ -z "$PYTHON_BIN" ]; then
   if command -v brew >/dev/null 2>&1; then
-    echo "📦 Python 없음 — Homebrew로 설치 중..."
-    brew install python@3.12
-    export PATH="/opt/homebrew/opt/python@3.12/libexec/bin:/opt/homebrew/bin:/usr/local/bin:$PATH"
-    PYTHON_BIN="python3.12"
-    command -v "$PYTHON_BIN" >/dev/null 2>&1 || PYTHON_BIN="python3"
+    echo "📦 Python 없음 — Homebrew로 설치 시도..."
+    if brew install python@3.12; then
+      export PATH="/opt/homebrew/opt/python@3.12/libexec/bin:/opt/homebrew/bin:/usr/local/bin:$PATH"
+      PYTHON_BIN="python3.12"
+      command -v "$PYTHON_BIN" >/dev/null 2>&1 || PYTHON_BIN="python3"
+    else
+      echo "⚠️ Homebrew 설치 실패 — 공식 런타임 다운로드로 대체"
+      install_python_tarball
+    fi
   else
-    echo "📦 Python 없고 Homebrew도 없음 — 공식 런타임 다운로드 (이 폴더 안에 설치, 비밀번호 불필요)"
-    URL="https://github.com/astral-sh/python-build-standalone/releases/download/20241016/cpython-3.11.10%2B20241016-${ARC}-apple-darwin-install_only.tar.gz"
-    mkdir -p "$ROOT/runtime"
-    curl -fL "$URL" -o "$TMP_TGZ"
-    tar -xzf "$TMP_TGZ" -C "$ROOT/runtime"
-    PYTHON_BIN="$ROOT/runtime/python/bin/python3"
+    install_python_tarball
   fi
+  command -v "$PYTHON_BIN" >/dev/null 2>&1 || [ -x "$PYTHON_BIN" ] || install_python_tarball
 fi
 echo "✔ python: $("$PYTHON_BIN" --version) ($PYTHON_BIN)"
 
@@ -111,26 +120,37 @@ if [ -z "$NODE" ] && [ -d "$HOME/.nvm/versions/node" ]; then
     NODE="$HOME/.nvm/versions/node/$newest/bin/node"
 fi
 
+install_node_tarball() {
+  # 주의: nodejs.org tarball 이름은 arm64/x64 (aarch64/x86_64 아님!)
+  NARC="arm64"; [ "$(uname -m)" = "x86_64" ] && NARC="x64"
+  NURL="https://nodejs.org/dist/v22.14.0/node-v22.14.0-darwin-${NARC}.tar.gz"
+  mkdir -p "$ROOT/runtime"
+  curl -fL "$NURL" -o "$TMP_TGZ"
+  tar -xzf "$TMP_TGZ" -C "$ROOT/runtime"
+  rm -rf "$ROOT/runtime/node"
+  mv "$ROOT/runtime/node-v22.14.0-darwin-${NARC}" "$ROOT/runtime/node"
+  NODE="$ROOT/runtime/node/bin/node"
+}
+
 if [ -z "$NODE" ]; then
-  ARC="arm64"; [ "$(uname -m)" = "x86_64" ] && ARC="x64"
   if command -v brew >/dev/null 2>&1; then
-    echo "📦 node 없음 — Homebrew로 설치 중..."
-    brew install node
-    NODE="node"
+    echo "📦 node 없음 — Homebrew로 설치 시도..."
+    if brew install node && command -v node >/dev/null 2>&1; then
+      NODE="node"
+    else
+      echo "⚠️ Homebrew 설치 실패 — 공식 tarball 다운로드로 대체"
+      install_node_tarball
+    fi
   else
     echo "📦 node 없고 Homebrew도 없음 — 공식 tarball 다운로드 (이 폴더 안에 설치, 비밀번호 불필요)"
-    # 주의: nodejs.org tarball 이름은 arm64/x64 (aarch64/x86_64 아님!)
-    NARC="arm64"; [ "$(uname -m)" = "x86_64" ] && NARC="x64"
-    NURL="https://nodejs.org/dist/v22.14.0/node-v22.14.0-darwin-${NARC}.tar.gz"
-    mkdir -p "$ROOT/runtime"
-    curl -fL "$NURL" -o "$TMP_TGZ"
-    tar -xzf "$TMP_TGZ" -C "$ROOT/runtime"
-    rm -rf "$ROOT/runtime/node"
-    mv "$ROOT/runtime/node-v22.14.0-darwin-${NARC}" "$ROOT/runtime/node"
-    NODE="$ROOT/runtime/node/bin/node"
+    install_node_tarball
   fi
 fi
-echo "✔ node $("$NODE" --version)"
+if [ -n "$NODE" ]; then
+  echo "✔ node $("$NODE" --version)"
+else
+  echo "⚠️ node 설치 실패 — 일부 YouTube 영상(JS challenge)이 다운로드 안 될 수 있음"
+fi
 
 # ---------- 백엔드 venv ----------
 cd "$ROOT/backend"

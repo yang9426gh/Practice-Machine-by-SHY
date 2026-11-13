@@ -45,6 +45,7 @@ def main():
     if not todo:
         return
     model = AutoModel.from_pretrained("puar-playground/btc-chord", trust_remote_code=True, large_voca=True)
+    fails = 0
     for vid, title, d, side in todo:
         try:
             mix, sr = None, None
@@ -56,11 +57,20 @@ def main():
             tl = model.predict(a22)
             out = {"model": "puar-playground/btc-chord", "large_voca": True, "sr": 22050,
                    "input": "bass+other+guitar+piano", "title": title, "segments": tl}
-            with open(side, "w", encoding="utf-8") as f:
+            # 원자적 기록 — 크래시 중 잘린 파일이 exists-스킵으로 '완료' 보호되는 것 방지
+            tmp = side + ".tmp"
+            with open(tmp, "w", encoding="utf-8") as f:
                 json.dump(out, f, ensure_ascii=False)
+            os.replace(tmp, side)
             print(f"ok: {vid} ({title}) -> {len(tl)} segments", flush=True)
         except Exception as e:
+            fails += 1
+            import traceback
+            traceback.print_exc()
             print(f"FAIL: {vid}: {e}", flush=True)
+    if fails:
+        print(f"총 {fails}/{len(todo)}곡 실패", flush=True)
+        sys.exit(1)
 
 
 if __name__ == "__main__":

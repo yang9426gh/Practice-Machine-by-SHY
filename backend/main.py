@@ -467,7 +467,7 @@ async def post_queue(url: str = "", name: str = "", thumbnail_url: str = ""):
             if not get_preset(DATA_DIR, vid):
                 title = thumb = None
                 try:
-                    wp = YTM.get_watch_playlist(vid)
+                    wp = await run_in_threadpool(YTM.get_watch_playlist, vid)
                     if wp.get("tracks"):
                         t = wp["tracks"][0]
                         title = t.get("title")
@@ -556,29 +556,33 @@ def run_pipeline(url: str, output_dir: str, task_id: str):
             raise RuntimeError("cancelled")
 
         set_task(task_id, status="processing", stage="downloading_audio", progress=0)
-        orig_file = download_youtube_audio(
-            canon,
-            output_dir,
-            cancel_cb=lambda: is_cancelled(task_id),
-            proc_cb=lambda p: register_proc(task_id, p),
-            progress_cb=lambda p: set_task(task_id, progress=p),
-        )
-        clear_proc(task_id)
+        try:
+            orig_file = download_youtube_audio(
+                canon,
+                output_dir,
+                cancel_cb=lambda: is_cancelled(task_id),
+                proc_cb=lambda p: register_proc(task_id, p),
+                progress_cb=lambda p: set_task(task_id, progress=p),
+            )
+        finally:
+            clear_proc(task_id)
 
         if is_cancelled(task_id):
             raise RuntimeError("cancelled")
 
         set_task(task_id, status="processing", stage="separating", progress=0)
-        separate_stems(
-            orig_file,
-            output_dir,
-            task_id=task_id,
-            model_name=os.environ.get("HOLY_DEMUCS_MODEL", "htdemucs_6s"),
-            progress_cb=lambda p: set_task(task_id, progress=p),
-            cancel_cb=lambda: is_cancelled(task_id),
-            proc_cb=lambda p: register_proc(task_id, p),
-        )
-        clear_proc(task_id)
+        try:
+            separate_stems(
+                orig_file,
+                output_dir,
+                task_id=task_id,
+                model_name=os.environ.get("HOLY_DEMUCS_MODEL", "htdemucs_6s"),
+                progress_cb=lambda p: set_task(task_id, progress=p),
+                cancel_cb=lambda: is_cancelled(task_id),
+                proc_cb=lambda p: register_proc(task_id, p),
+            )
+        finally:
+            clear_proc(task_id)
 
         stems = find_stems(output_dir)
         vocals_path = stems.get("vocals") or ""
@@ -620,8 +624,13 @@ def run_pipeline(url: str, output_dir: str, task_id: str):
         if str(e) == "cancelled" or "cancelled" in str(e).lower():
             set_task(task_id, status="cancelled", stage="cancelled", progress=0, error="cancelled")
             push_history(task_id, url, "cancelled", "cancelled", 0)
+            # 플래그 소비 — 안 지우면 같은 곡(동일 task_id) 재추가가 즉시 실패
+            with RUNNING_LOCK:
+                CANCELLED.discard(task_id)
             return
-        set_task(task_id, status="error", stage="error", error=str(e) + "\n" + traceback.format_exc())
+        set_task(task_id, status="error", stage="error",
+                 error=str(e).splitlines()[0] if str(e) else "error")
+        print(f"[pipeline] {task_id} error: {traceback.format_exc()}", flush=True)
         push_history(task_id, url, "error", "error", 0)
         raise
 
@@ -642,6 +651,11 @@ async def get_status(task_id: str):
     with TASKS_LOCK:
         meta = TASKS.get(task_id, {}).copy()
 
+    # 알 수 없는 task_id: 흔적(진행 메타·스템 파일)이 전혀 없으면 404
+    # — 재시작 후 TASKS 휘발로 폴링이 영원히 안 끝나는 문제 방지
+    if not stems and not meta and task_id != "test_run":
+        raise HTTPException(status_code=404, detail="Unknown task")
+
     # prefer multi-stem completion if available
     if stems:
         stage = meta.get("stage")
@@ -654,11 +668,12 @@ async def get_status(task_id: str):
                 # stems paths are absolute; make relative to DATA_DIR for StaticFiles
                 rel = os.path.relpath(os.path.dirname(next(iter(stems.values()))), DATA_DIR)
 
+            _err = str(meta.get("error") or "unknown error").splitlines()[0]
             return {
                 "status": "error",
                 "stage": "error",
                 "progress": meta.get("progress", 0),
-                "error": meta.get("error"),
+                "error": _err,
                 "stems": {k: f"/audio/{os.path.relpath(v, DATA_DIR)}" for k, v in stems.items()},
                 "video": f"/audio/{os.path.basename(output_dir)}/video.mp4" if os.path.exists(video_file) else None,
             }
@@ -681,7 +696,15 @@ async def get_status(task_id: str):
         }
 
     if meta.get("stage") == "error":
-        return {"status": "error", **meta}
+        _err = str(meta.get("error") or "unknown error").splitlines()[0]
+        return {
+            "status": "error",
+            "stage": "error",
+            "progress": meta.get("progress", 0),
+            "error": _err,
+            "stems": {},
+            "video": None,
+        }
 
     return {
         "status": "processing",
@@ -693,7 +716,7 @@ async def get_status(task_id: str):
 async def meta(video_id: str):
     """Basic metadata (title/artist/album cover) from YouTube Music."""
     try:
-        wp = YTM.get_watch_playlist(video_id)
+        wp = await run_in_threadpool(YTM.get_watch_playlist, video_id)
         if not wp.get("tracks"):
             raise HTTPException(status_code=404, detail="No track metadata")
         t = wp["tracks"][0]
@@ -715,14 +738,6 @@ async def meta(video_id: str):
         raise
     except Exception as e:
         raise HTTPException(status_code=404, detail=f"No metadata available: {e}")
-
-
-@app.get("/queue")
-async def queue_status():
-    with QUEUE_LOCK:
-        items = [{"task_id": t[2], "url": t[0]} for t in list(QUEUE)]
-        current = CURRENT
-    return {"current": current, "items": items}
 
 
 @app.get("/jobs")
@@ -1047,7 +1062,7 @@ async def bpm_detect(task_id: str):
     try:
         from bpm_detect import detect_bpm_and_offset_from_wav
 
-        bpm, start_offset = detect_bpm_and_offset_from_wav(wav)
+        bpm, start_offset = await run_in_threadpool(detect_bpm_and_offset_from_wav, wav)
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"BPM detect failed: {e}")
 
@@ -1074,7 +1089,7 @@ async def key_detect(task_id: str):
     try:
         from key_detect import detect_key_from_wav
 
-        res = detect_key_from_wav(wav)
+        res = await run_in_threadpool(detect_key_from_wav, wav)
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Key detect failed: {e}")
 
@@ -1131,7 +1146,17 @@ async def export_mix(task_id: str, payload: dict = Body(default={})):  # noqa: B
     try:
         from export_mix import mixdown_to_mp3
 
-        mixdown_to_mp3(stems, gains, out_mp3)
+        # 인코딩은 스레드풀로(이벤트 루프 보호) + 임시파일 원자 교체(동시요청·중단 대비)
+        tmp_mp3 = f"{out_mp3}.tmp{os.getpid()}"
+        try:
+            await run_in_threadpool(mixdown_to_mp3, stems, gains, tmp_mp3)
+            os.replace(tmp_mp3, out_mp3)
+        finally:
+            if os.path.exists(tmp_mp3):
+                try:
+                    os.remove(tmp_mp3)
+                except OSError:
+                    pass
     except subprocess.CalledProcessError as e:
         raise HTTPException(status_code=500, detail=f"ffmpeg failed: {e}")
     except Exception as e:
@@ -1473,7 +1498,8 @@ def ensure_transposed(task_id: str, semitones: int):
     out_dir, tv, tm = transposed_paths(task_id, semitones)
     os.makedirs(out_dir, exist_ok=True)
 
-    if os.path.exists(tv) and os.path.exists(tm):
+    if (os.path.exists(tv) and os.path.exists(tm)
+            and os.path.getsize(tv) > 1024 and os.path.getsize(tm) > 1024):
         return out_dir, tv, tm
 
     # Pitch factor (2^(n/12))

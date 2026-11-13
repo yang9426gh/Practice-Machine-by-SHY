@@ -6,6 +6,30 @@ import time
 from typing import Callable, Optional
 
 
+def _cleanup_ytdlp_partials(output_path: str, prefix: str) -> None:
+    """다운로드 실패/취소 시 잘린 최종본·yt-dlp 중간 파일(f*.mp4/.part) 삭제.
+    안 지우면 부분 파일이 다음 호출에서 캐시 완본으로 오판됨."""
+    import glob
+    final = os.path.join(output_path, "original.wav" if prefix == "original" else f"{prefix}.mp4")
+    try:
+        if os.path.exists(final):
+            os.remove(final)
+    except OSError:
+        pass
+    try:
+        pats = [os.path.join(output_path, f"{prefix}.*.part"),
+                os.path.join(output_path, f"{prefix}*.f*.mp4"),
+                os.path.join(output_path, f"{prefix}*.webm"),
+                os.path.join(output_path, f"{prefix}*.tmp")]
+        for p in [x for pat in pats for x in glob.glob(pat)]:
+            try:
+                os.remove(p)
+            except OSError:
+                pass
+    except Exception:
+        pass
+
+
 def _terminate_proc(proc: subprocess.Popen) -> None:
     """취소 시 자식 프로세스 확실히 정리 — terminate→wait→kill 계단식.
     wait 없이 두면 좀비 프로세스 잔존 + stdout 파이프(파일디스크립터) 누수."""
@@ -136,6 +160,7 @@ def download_youtube_audio(
 
     proc = subprocess.Popen(
         cmd,
+        start_new_session=(os.name != "nt"),
         stdout=subprocess.PIPE,
         stderr=subprocess.STDOUT,
         text=True,
@@ -151,7 +176,15 @@ def download_youtube_audio(
     log_buf: list = []  # 실패 시 UI에 보여줄 로그 꼬리
     while True:
         if cancel_cb and cancel_cb():
+            # yt-dlp가 띄운 ffmpeg(변환)까지 한 번에 정리 — 별도 프로세스 그룹이라 서버에 영향 없음
+            try:
+                import signal
+                if hasattr(os, "killpg"):
+                    os.killpg(os.getpgid(proc.pid), signal.SIGTERM)
+            except Exception:
+                pass
             _terminate_proc(proc)
+            _cleanup_ytdlp_partials(output_path, "original")
             raise RuntimeError("cancelled")
 
         line = proc.stdout.readline() if proc.stdout else ""
@@ -174,6 +207,7 @@ def download_youtube_audio(
 
     rc = proc.wait()
     if rc != 0:
+        _cleanup_ytdlp_partials(output_path, "original")
         _raise_cmd_error(rc, cmd, "".join(log_buf))
 
     return f"{output_path}/original.wav"
@@ -189,10 +223,20 @@ def download_youtube_video(
 ) -> str:
     """Download a playable MP4 for local <video> playback."""
     out = os.path.join(output_path, "video.mp4")
-    if os.path.exists(out) and os.path.getsize(out) > 1024 * 1024:
-        if progress_cb:
-            progress_cb(100)
-        return out
+    if os.path.exists(out):
+        # 크기만 보면 병합 중단 파일을 완본으로 오판 — 디코딩 가능할 때만 캐시 확정
+        try:
+            from export_video import probe_video
+            probe_video(out)
+            if progress_cb:
+                progress_cb(100)
+            return out
+        except Exception:
+            pass
+        try:
+            os.remove(out)
+        except OSError:
+            pass
 
     print(f"[*] Downloading video from: {url}")
     fmt = (
@@ -239,6 +283,7 @@ def download_youtube_video(
 
     proc = subprocess.Popen(
         cmd,
+        start_new_session=(os.name != "nt"),
         stdout=subprocess.PIPE,
         stderr=subprocess.STDOUT,
         text=True,
@@ -254,7 +299,15 @@ def download_youtube_video(
     log_buf: list = []  # 실패 시 UI에 보여줄 로그 꼬리
     while True:
         if cancel_cb and cancel_cb():
+            # yt-dlp가 띄운 ffmpeg(병합)까지 한 번에 정리 — 별도 프로세스 그룹이라 서버에 영향 없음
+            try:
+                import signal
+                if hasattr(os, "killpg"):
+                    os.killpg(os.getpgid(proc.pid), signal.SIGTERM)
+            except Exception:
+                pass
             _terminate_proc(proc)
+            _cleanup_ytdlp_partials(output_path, "video")
             raise RuntimeError("cancelled")
 
         line = proc.stdout.readline() if proc.stdout else ""
@@ -277,6 +330,7 @@ def download_youtube_video(
 
     rc = proc.wait()
     if rc != 0:
+        _cleanup_ytdlp_partials(output_path, "video")
         _raise_cmd_error(rc, cmd, "".join(log_buf))
 
     if progress_cb:
@@ -315,6 +369,7 @@ def separate_stems(
 
     proc = subprocess.Popen(
         cmd,
+        start_new_session=(os.name != "nt"),
         stdout=subprocess.PIPE,
         stderr=subprocess.STDOUT,
         text=True,

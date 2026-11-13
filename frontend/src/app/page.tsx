@@ -493,7 +493,7 @@ export default function KaraokePage() {
   };
   const stampChordAtCursor = (chord?: string | null) => {
     const el = document.getElementById("chords-edit-area") as HTMLTextAreaElement | null;
-    const t = Math.max(0, currentPositionLive() + stampOffset("chord"));
+    const t = Math.max(0, Math.round((currentPositionLive() + stampOffset("chord")) * 100) / 100);
     const mm = Math.floor(t / 60);
     const ss = t - mm * 60;
     const stamp = `[${String(mm).padStart(2, "0")}:${ss.toFixed(2).padStart(5, "0")}]`;
@@ -607,6 +607,11 @@ export default function KaraokePage() {
   // 워크플로: 사람이 ⏱으로 타이밍을 찍고(가장 정확) → 이 버튼으로 코드 이름만 BTC 데이터에서 채움(초안).
   // 이미 코드가 붙은 스탬프는 건드리지 않음 — 수동 수정이 파괴되지 않고, 재실행 시 새 빈 스탬프만 채워짐.
   const [btcStampFillBusy, setBtcStampFillBusy] = useState(false);
+  const videoExportAliveRef = useRef(true);
+  useEffect(() => {
+    videoExportAliveRef.current = true;
+    return () => { videoExportAliveRef.current = false; }; // 페이지 이탈 시 폴링 중단 신호
+  }, []);
   const btcFillStamps = async () => {
     if (btcStampFillBusy) return;
     if (!/\[\d{1,3}:\d{1,2}(?:[.:]\d{1,3})?\]/.test(chordsText)) {
@@ -645,7 +650,9 @@ export default function KaraokePage() {
         return harteSegToAppChord(s.chord, pref);
       };
       let filled = 0, missed = 0;
-      const text = chordsText;
+      // await 동안 편집창을 고친 경우 최신값 사용 (stale closure 방지)
+      const elNow = document.getElementById("chords-edit-area") as HTMLTextAreaElement | null;
+      const text = elNow ? elNow.value : chordsText;
       const newText = text.replace(
         /\[(\d{1,3}):(\d{1,2}(?:[.:]\d{1,3})?)\]/g,
         (full: string, mm: string, ss: string, offset: number) => {
@@ -670,6 +677,8 @@ export default function KaraokePage() {
       toast(filled
         ? `빈 스탬프 ${filled}개 채움${missed ? ` — 매칭 못한 ${missed}개는 - 표시` : ""}`
         : `매칭 못한 ${missed}개 스탬프는 - 표시로 남김`);
+    } catch (e: any) {
+      toast(`스탬프 채우기 실패: ${String(e?.message || e)}`);
     } finally {
       setBtcStampFillBusy(false);
     }
@@ -1018,7 +1027,7 @@ export default function KaraokePage() {
   // 편집기 텍스트커서 위치에 현재 재생 시간 스탬프 삽입 후 커서를 다음 줄 맨 앞으로 (연타 워크플로)
   const stampAtCursor = () => {
     const el = document.getElementById("lyrics-edit-area") as HTMLTextAreaElement | null;
-    const t = Math.max(0, currentPositionLive() + stampOffset("lyric"));
+    const t = Math.max(0, Math.round((currentPositionLive() + stampOffset("lyric")) * 100) / 100);
     const mm = Math.floor(t / 60);
     const ss = t - mm * 60;
     const stamp = `[${String(mm).padStart(2, "0")}:${ss.toFixed(2).padStart(5, "0")}]`;
@@ -1935,9 +1944,24 @@ export default function KaraokePage() {
       }
     } catch {}
 
-    const resp = await fetch(`${BACKEND}/process?url=${encodeURIComponent(canonical)}&queued=true`, { method: "POST" });
-    const jj = await resp.json();
-    const tid = String(jj.task_id || "");
+    let jj: any = null;
+    let tid = "";
+    try {
+      const resp = await fetch(`${BACKEND}/process?url=${encodeURIComponent(canonical)}&queued=true`, { method: "POST" });
+      jj = await resp.json();
+      tid = String(jj?.task_id || "");
+      if (!resp.ok || !tid) {
+        setStatus("idle");
+        setStage("idle");
+        toast(jj?.detail || "처리 시작 실패 — 서버 확인");
+        return;
+      }
+    } catch {
+      setStatus("idle");
+      setStage("idle");
+      toast("처리 시작 실패 — 서버 확인");
+      return;
+    }
     setTaskId(tid);
 
     const applyCompletedStatus = async (sj: any) => {
@@ -2260,6 +2284,7 @@ export default function KaraokePage() {
       setVideoExportPct(0);
       for (;;) {
         await new Promise((r) => setTimeout(r, 700));
+        if (!videoExportAliveRef.current) return; // 페이지 이탈 — 폴링 중단
         const sr = await fetch(`${BACKEND}/export/video/${taskId}/status`);
         const sj = await sr.json();
         if (!sr.ok) throw new Error(sj?.detail || "status failed");
@@ -3281,10 +3306,15 @@ export default function KaraokePage() {
                   <button
                     onClick={async () => {
                       if (!confirm("저장된 가사를 삭제할까요?")) return;
-                      await fetch(`${BACKEND}/lyrics/${videoId}`, { method: "DELETE" });
-                      setLyrics(null);
-                      setLyricsOpen(false);
-                      toast("가사 삭제됨");
+                      try {
+                        const r = await fetch(`${BACKEND}/lyrics/${videoId}`, { method: "DELETE" });
+                        if (!r.ok) { toast("삭제 실패 — 서버 확인"); return; }
+                        setLyrics(null);
+                        setLyricsOpen(false);
+                        toast("가사 삭제됨");
+                      } catch {
+                        toast("삭제 실패 — 서버 확인");
+                      }
                     }}
                     className="px-3 py-2 rounded-lg border border-red-900/60 text-red-300 text-sm"
                   >
@@ -3416,11 +3446,16 @@ export default function KaraokePage() {
                 <button
                   onClick={async () => {
                     if (!confirm("저장된 코드를 삭제할까요?")) return;
-                    await fetch(`${BACKEND}/chords/${videoId}`, { method: "DELETE" });
-                    setChords(null);
-                    setChordsOpen(false);
-                    setChordsText("");
-                    toast("코드 삭제됨");
+                    try {
+                      const r = await fetch(`${BACKEND}/chords/${videoId}`, { method: "DELETE" });
+                      if (!r.ok) { toast("삭제 실패 — 서버 확인"); return; }
+                      setChords(null);
+                      setChordsOpen(false);
+                      setChordsText("");
+                      toast("코드 삭제됨");
+                    } catch {
+                      toast("삭제 실패 — 서버 확인");
+                    }
                   }}
                   className="px-3 py-2 rounded-lg border border-red-900/60 text-red-300 text-sm"
                 >

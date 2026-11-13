@@ -90,11 +90,14 @@ def build_ass(
     chord_lines: List[dict],
     lyric_lines: List[dict],
     chord_shift: int = 0,
-    font_name: str = "Apple SD Gothic Neo",
+    font_name: str = "",
 ) -> str:
     """chord_lines: [{time, chords:[{time,text}]}] (초, 오프셋 적용됨)
     lyric_lines: [{time, text}] (초, 오프셋 적용됨)
     """
+    # Windows 배포판엔 맥 폰트가 없음 — 플랫폼 기본 폰트 (한글 tofu 방지)
+    if not font_name:
+        font_name = "Malgun Gothic" if os.name == "nt" else "Apple SD Gothic Neo"
     # --- 타임라인 계산: 각 이벤트 start → 같은 트랙 다음 이벤트 start (마지막은 +4s) ---
     def _timeline(lines: List[dict], dur: float = 4.0) -> List[Tuple[float, float, dict]]:
         out: List[Tuple[float, float, dict]] = []
@@ -249,7 +252,10 @@ def export_video(
     # 자막이 있을 때만 subtitles 필터 적용 (없으면 영상 그대로)
     if ass_path and os.path.exists(ass_path):
         ass_arg = ass_path.replace("\\", "/").replace(":", "\\:")
-        fonts_dirs = "/System/Library/Fonts:/System/Library/Fonts/Supplemental".replace(":", "\\:")
+        if os.name == "nt":
+            fonts_dirs = "C\\:/Windows/Fonts"
+        else:
+            fonts_dirs = "/System/Library/Fonts:/System/Library/Fonts/Supplemental".replace(":", "\\:")
         vf = f"subtitles=filename='{ass_arg}':fontsdir='{fonts_dirs}'"
         fc = f"[0:v]{vf}[vout];" + mix_fc
     else:
